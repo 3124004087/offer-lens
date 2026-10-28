@@ -1,0 +1,32 @@
+:root {
+  /* 主色 */
+  --c-primary: #4f46e5;
+  --c-primary-dark: #4338ca;
+  --c-primary-weak: #eef2ff;
+
+  /* 中性色 */
+  --c-bg: #f6f7f9;
+  --c-surface: #ffffff;
+  --c-text: #18181b;
+  --c-text-2: #71717a;
+  --c-text-3: #a1a1aa;
+  --c-border: #e4e4e7;
+
+  /* 语义色 */
+  --c-success: #059669;
+  --c-success-weak: #ecfdf5;
+  --c-danger: #dc2626;
+  --c-danger-weak: #fef2f2;
+  --c-warn: #d97706;
+  --c-warn-weak: #fffbeb;
+
+  /* 形状 */
+  --radius-sm: 6px;
+  --radius: 10px;
+  --radius-lg: 14px;
+
+  --shadow-sm: 0 1px 2px rgba(24, 24, 27, 0.04);
+  --shadow: 0 1px 2px rgba(24, 24, 27, 0.04), 0 4px 14px rgba(24, 24, 27, 0.05);
+
+  --header-h: 56px;
+}
