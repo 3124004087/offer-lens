@@ -33,6 +33,12 @@ const router = createRouter({
       component: () => import('@/views/Settings.vue'),
       meta: { title: '设置' },
     },
+    {
+      path: '/about',
+      name: 'about',
+      component: () => import('@/views/About.vue'),
+      meta: { title: '关于' },
+    },
     { path: '/:pathMatch(.*)*', redirect: '/' },
   ],
   scrollBehavior: () => ({ top: 0 }),

@@ -49,6 +49,7 @@ const activeName = computed(() => route.name as string)
 
     <footer class="shell-footer">
       <div class="container text-xs text-3">
+        <RouterLink to="/about" class="about-link">关于</RouterLink>
         OfferLens · 简历 × JD 智能匹配 · 数据全部保存在你的浏览器本地
       </div>
     </footer>
@@ -131,6 +132,17 @@ const activeName = computed(() => route.name as string)
 .shell-footer {
   padding: 18px 0 28px;
   text-align: center;
+}
+
+.about-link {
+  margin-right: 12px;
+  color: var(--c-primary);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.about-link:hover {
+  color: var(--c-primary-dark);
 }
 
 @media (max-width: 640px) {
