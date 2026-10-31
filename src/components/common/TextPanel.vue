@@ -1,10 +1,30 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed,ref } from 'vue'
 
 /**
  * 双栏通用输入面板：简历 / JD 复用
  * 用法：<TextPanel v-model="store.resumeText" title="我的简历" />
  */
+const pasteHint=ref('')
+
+/** 读系统剪贴板并追加到输入框；失败只提示，不阻断输入 */
+async function pasteFromClipboard() {
+  pasteHint.value = ''
+  try {
+    // 非 https（非 localhost）时 navigator.clipboard 是 undefined，
+    // 调用会抛 TypeError，统一被下面 catch 兜住
+    const clip = await navigator.clipboard.readText()
+    if (!clip.trim()) {
+      pasteHint.value = '剪贴板是空的'
+      return
+    }
+    // 赋值给 text 会走上面那个 set，自动享受 maxLength 截断
+    text.value = props.modelValue ? props.modelValue + '\n' + clip : clip
+  } catch {
+    pasteHint.value = '浏览器不允许读剪贴板，请手动 Ctrl/Cmd + V'
+  }
+}
+
 const props = withDefaults(
   defineProps<{
     title: string
@@ -46,9 +66,12 @@ const isNearLimit = computed(() => count.value >= props.maxLength * 0.9)
         <h2 class="panel-title">{{ title }}</h2>
         <p v-if="subtitle" class="panel-sub text-xs text-3">{{ subtitle }}</p>
       </div>
-      <span class="counter" :class="{ 'is-warn': isNearLimit }">
-        {{ count }} / {{ maxLength }}
-      </span>
+      <div class="panel-tools">
+        <button class="btn paste-btn" type="button" @click="pasteFromClipboard">粘贴</button>
+        <span class="counter" :class="{ 'is-warn': isNearLimit }">
+          {{ count }} / {{ maxLength }}
+        </span>
+      </div>
     </header>
 
     <textarea
@@ -61,6 +84,7 @@ const isNearLimit = computed(() => count.value >= props.maxLength * 0.9)
 
     <footer class="panel-foot">
       <slot name="footer" />
+      <span v-if="pasteHint" class="hint warn">{{ pasteHint }}</span>
       <span v-if="isTooShort" class="hint warn">
         内容少于 {{ minLength }} 字，判断会不准
       </span>
@@ -94,6 +118,14 @@ const isNearLimit = computed(() => count.value >= props.maxLength * 0.9)
 .panel-sub {
   margin-top: 2px;
 }
+
+.panel-tools {
+ display: flex; align-items: center; gap: 8px; flex-shrink: 0; 
+ }
+
+.paste-btn {
+ height: 28px; padding: 0 10px; font-size: 12px; border-radius: var(--radius-sm); 
+ }
 
 .counter {
   flex-shrink: 0;
