@@ -6,7 +6,7 @@ import type { KeywordDiff } from '@/types'
  */
 export const SKILLS: string[] = [
   'TypeScript', 'JavaScript', 'Pinia', 'Vuex', 'Webpack', 'Vite', 'Rollup',
-  'Vue3', 'Vue2', 'Vue', 'React', 'Node.js', 'ECharts', 'Sass', 'Less',
+  'Vue3', 'Vue2', 'Vue', 'React', 'Node.js', 'NodeJS', 'ECharts', 'Sass', 'Less',
   'Git', 'HTTP', 'HTML', 'CSS', '小程序', '性能优化', '工程化', '组件库',
   '单元测试', '微前端', 'VueRouter', 'ElementPlus',
 ]
@@ -46,6 +46,29 @@ function normalize(text: string): string {
 /** 是否字母/数字（用于词边界判断，避免 Git 命中 Digital） */
 function isWordChar(ch: string | undefined): boolean {
   return !!ch && /[a-zA-Z0-9]/.test(ch)
+}
+
+/**
+ * 词边界校验
+ *
+ * 严格版「左右都不能是字母/数字」会误伤一类高频写法：HTML5 / CSS3 / Webpack5。
+ * 数字在后面只是版本号，不代表换了个词，所以右侧遇到数字要放行。
+ *
+ * 但有三个方向不能一起放宽，否则边界校验就形同虚设：
+ * - 左侧数字仍要拦：99Git 不是技能
+ * - 关键词本身以数字结尾时右侧数字要拦：Vue33 不是 Vue3（needle 的末位不是字母，就说明它自带版本号）
+ * - 版本号只可能是一位数：HTML5 命中，HTML50 / css2024 不命中（后一位还是数字就不是版本号）
+ * - 汉字不用管：中文字符本来就不是 [a-zA-Z0-9]
+ */
+function boundaryOk(haystack: string, start: number, end: number): boolean {
+  if (isWordChar(haystack[start - 1])) return false
+  const right = haystack[end]
+  if (!isWordChar(right)) return true
+
+  const needle = haystack.slice(start, end)
+  const needleEndsWithLetter = /[a-zA-Z]$/.test(needle)
+  const isSingleDigitSuffix = /[0-9]/.test(right) && !/[0-9]/.test(haystack[end + 1] ?? '')
+  return needleEndsWithLetter && isSingleDigitSuffix
 }
 
 /** 取规范名，用于跨写法比较 */
@@ -92,10 +115,10 @@ export function extractKeywords(text: string): string[] {
         }
       }
 
-      // ② 词边界：左右不能紧跟字母或数字
-      const boundaryOk = !isWordChar(haystack[idx - 1]) && !isWordChar(haystack[end])
+      // ② 词边界：左右不能紧跟字母或数字（版本号后缀例外，见 boundaryOk）
+      const boundaryPassed = boundaryOk(haystack, idx, end)
 
-      if (free && boundaryOk) {
+      if (free && boundaryPassed) {
         hits.add(word)
         for (let i = idx; i < end; i++) used[i] = true
       }

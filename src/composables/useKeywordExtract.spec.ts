@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { diffKeywords, extractKeywords } from './useKeywordExtract'
+import { canonical, diffKeywords, extractKeywords } from './useKeywordExtract'
 
 /**
  * 这 10 条用例就是 W1D4 的验收标准。
@@ -50,6 +50,23 @@ describe('extractKeywords', () => {
     const start = performance.now()
     extractKeywords(long)
     expect(performance.now() - start).toBeLessThan(100)
+  })
+
+  // ↓ 11-13 是 W1D4 补的三条。前两条一开始是红的，用来逼出真实漏判
+  it('11. HTML5 / CSS3 这种带版本号后缀的写法也要命中', () => {
+    const r = extractKeywords('熟悉 HTML5 语义化标签与 CSS3 动画')
+    expect(r).toContain('HTML')
+    expect(r).toContain('CSS')
+  })
+
+  it('12. NodeJS 是 Node.js 最常见的另一种写法，也要能抽出来', () => {
+    expect(extractKeywords('熟悉 NodeJS 服务端开发')).toContain('NodeJS')
+    // 只抽出来还不够：JD 写 Node.js、简历写 NodeJS 时，比较阶段必须视为同一个词
+    expect(canonical('NodeJS')).toBe(canonical('Node.js'))
+  })
+
+  it('13. VueRouter 只命中长词，不会被 Vue 拆成两半', () => {
+    expect(extractKeywords('用过 VueRouter 做权限路由')).toEqual(['VueRouter'])
   })
 })
 
