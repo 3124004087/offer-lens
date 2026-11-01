@@ -1,30 +1,10 @@
 <script setup lang="ts">
-import { computed,ref } from 'vue'
+import { computed, ref } from 'vue'
 
 /**
  * 双栏通用输入面板：简历 / JD 复用
  * 用法：<TextPanel v-model="store.resumeText" title="我的简历" />
  */
-const pasteHint=ref('')
-
-/** 读系统剪贴板并追加到输入框；失败只提示，不阻断输入 */
-async function pasteFromClipboard() {
-  pasteHint.value = ''
-  try {
-    // 非 https（非 localhost）时 navigator.clipboard 是 undefined，
-    // 调用会抛 TypeError，统一被下面 catch 兜住
-    const clip = await navigator.clipboard.readText()
-    if (!clip.trim()) {
-      pasteHint.value = '剪贴板是空的'
-      return
-    }
-    // 赋值给 text 会走上面那个 set，自动享受 maxLength 截断
-    text.value = props.modelValue ? props.modelValue + '\n' + clip : clip
-  } catch {
-    pasteHint.value = '浏览器不允许读剪贴板，请手动 Ctrl/Cmd + V'
-  }
-}
-
 const props = withDefaults(
   defineProps<{
     title: string
@@ -57,6 +37,52 @@ const text = computed({
 const count = computed(() => props.modelValue.length)
 const isTooShort = computed(() => count.value > 0 && count.value < props.minLength)
 const isNearLimit = computed(() => count.value >= props.maxLength * 0.9)
+
+const pasteHint = ref('')
+const isPasting = ref(false)
+
+/**
+ * 读系统剪贴板并追加到输入框；失败只提示，不阻断输入。
+ * 放在 computed 之后声明，避免依赖「点击时才调用」来绕过暂时性死区。
+ */
+async function pasteFromClipboard() {
+  // 防连点：readText 是异步的，等待期间按钮还能点，两次都成功就会追加两遍
+  if (isPasting.value) return
+  pasteHint.value = ''
+
+  // 非 https 且非 localhost 时 navigator.clipboard 是 undefined，
+  // 直接调 readText 会抛 TypeError。先判空，才能给出准确的提示
+  if (!navigator.clipboard?.readText) {
+    pasteHint.value = '当前环境不支持自动读取剪贴板，请手动 Ctrl/Cmd + V'
+    return
+  }
+
+  isPasting.value = true
+  try {
+    const clip = await navigator.clipboard.readText()
+    if (!clip.trim()) {
+      pasteHint.value = '剪贴板是空的'
+      return
+    }
+    const next = props.modelValue ? props.modelValue + '\n' + clip : clip
+    // 赋值给 text 会走 set，自动享受 maxLength 截断
+    text.value = next
+    // 追加模式下是从尾部截断，被砍掉的是刚粘进来的内容，必须说出来
+    if (next.length > props.maxLength) {
+      pasteHint.value = `已到 ${props.maxLength} 字上限，后粘的部分没放进去`
+    }
+  } catch {
+    // 用户点了拒绝或系统策略拦截；重试不会再弹授权，只能退化成手动粘贴
+    pasteHint.value = '没有剪贴板权限，请手动 Ctrl/Cmd + V'
+  } finally {
+    isPasting.value = false
+  }
+}
+
+/** 用户开始手动输入时收掉上一次的粘贴提示，避免提示一直挂着误导 */
+function clearPasteHint() {
+  if (pasteHint.value) pasteHint.value = ''
+}
 </script>
 
 <template>
@@ -67,7 +93,14 @@ const isNearLimit = computed(() => count.value >= props.maxLength * 0.9)
         <p v-if="subtitle" class="panel-sub text-xs text-3">{{ subtitle }}</p>
       </div>
       <div class="panel-tools">
-        <button class="btn paste-btn" type="button" @click="pasteFromClipboard">粘贴</button>
+        <button
+          class="btn paste-btn"
+          type="button"
+          :disabled="isPasting"
+          @click="pasteFromClipboard"
+        >
+          {{ isPasting ? '读取中…' : '粘贴' }}
+        </button>
         <span class="counter" :class="{ 'is-warn': isNearLimit }">
           {{ count }} / {{ maxLength }}
         </span>
@@ -80,6 +113,7 @@ const isNearLimit = computed(() => count.value >= props.maxLength * 0.9)
       :rows="rows"
       :placeholder="placeholder"
       spellcheck="false"
+      @input="clearPasteHint"
     />
 
     <footer class="panel-foot">
@@ -120,12 +154,23 @@ const isNearLimit = computed(() => count.value >= props.maxLength * 0.9)
 }
 
 .panel-tools {
- display: flex; align-items: center; gap: 8px; flex-shrink: 0; 
- }
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
 
 .paste-btn {
- height: 28px; padding: 0 10px; font-size: 12px; border-radius: var(--radius-sm); 
- }
+  height: 28px;
+  padding: 0 10px;
+  font-size: 12px;
+  border-radius: var(--radius-sm);
+}
+
+.paste-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
 
 .counter {
   flex-shrink: 0;
