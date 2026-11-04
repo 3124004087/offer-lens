@@ -57,7 +57,6 @@ export const useWorkspaceStore = defineStore('workspace', () => {
    * 否则「防抖写」和「关页面前写」各存一份序列化逻辑，加字段必漏一个。
    */
   function writeDraft() {
-    console.log('写盘', performance.now().toFixed(0))
     const draft: Draft = {
       resumeText: resumeText.value,
       jobText: jobText.value,
