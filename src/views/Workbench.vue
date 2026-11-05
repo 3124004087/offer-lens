@@ -3,7 +3,9 @@ import { computed } from 'vue'
 import { useRouter } from 'vue-router'
 import TextPanel from '@/components/common/TextPanel.vue'
 import KeywordTags from '@/components/common/KeywordTags.vue'
+import StreamBlock from '@/components/common/StreamBlock.vue'
 import { useWorkspaceStore } from '@/stores/workspace'
+import { useAIStream } from '@/composables/useAIStream'
 import {
   SAMPLE_COMPANY,
   SAMPLE_JOB,
@@ -13,6 +15,17 @@ import {
 
 const store = useWorkspaceStore()
 const router = useRouter()
+
+// W2D2 临时试跑区：只为肉眼确认「字是一个一个出来的」，D5 接进结果页后删掉
+const { text, loading, error, run } = useAIStream()
+
+function tryStream() {
+  run({
+    system: '你是前端面试官，只输出点评，不要客套话。',
+    // 截 300 字，省 token 也省时间，验证流式不需要长文
+    user: `用 80 字点评这段简历：${store.resumeText.slice(0, 300)}`,
+  })
+}
 
 const hasAnyText = computed(
   () => store.resumeText.trim().length > 0 || store.jobText.trim().length > 0,
@@ -91,6 +104,18 @@ function handleAnalyze() {
         :extra="store.keywordDiff.extra"
       />
       <p v-else class="text-sm text-3">还什么都没填。先粘一段内容试试。</p>
+    </section>
+
+    <section class="card card-pad">
+      <div class="section-head">
+        <h2 class="section-title">流式试跑（临时）</h2>
+        <button class="btn btn-sm" :disabled="loading || !store.resumeText" @click="tryStream">
+          {{ loading ? '生成中…' : '试跑' }}
+        </button>
+      </div>
+
+      <p v-if="error" class="text-sm err">{{ error }}</p>
+      <StreamBlock :text="text" :loading="loading" />
     </section>
 
     <section class="card card-pad action">
@@ -202,6 +227,10 @@ function handleAnalyze() {
 .section-title {
   font-size: 14px;
   font-weight: 600;
+}
+
+.err {
+  color: var(--c-danger);
 }
 
 .action {
