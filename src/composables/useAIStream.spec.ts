@@ -60,4 +60,18 @@ describe('consume', () => {
     ])
     expect(text).toBe('ok')
   })
+
+  it('5. 最后一行没有 \\n 结尾', async () => {
+    const text = await collect([
+      'data: {"choices":[{"delta":{"content":"前半"}}]}\n',
+      'data: {"choices":[{"delta":{"content":"尾巴"}}]}', // 故意不带 \n，收尾分支要接住
+    ])
+    expect(text).toBe('前半尾巴')
+  })
+
+  it('6. 尾部汉字被切成两半', async () => {
+    const bytes = new TextEncoder().encode('data: {"choices":[{"delta":{"content":"字"}}]}')
+    const cut = bytes.length - 1 // 最后一个字节切出去，模拟「半个汉字卡在 decoder 里」
+    expect(await collect([bytes.slice(0, cut), bytes.slice(cut)])).toBe('字')
+  })
 })
