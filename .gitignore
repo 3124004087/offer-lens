@@ -22,6 +22,9 @@ coverage
 # 部署
 .vercel
 
+# 测试临时目录（改了 TEMP 指向项目内时产生）
+.tmp-vitest
+
 # 日志
 npm-debug.log*
 yarn-debug.log*

@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:api": "vercel dev",
     "build": "vue-tsc --noEmit && vite build",
     "preview": "vite preview",
     "test": "vitest run"
@@ -18,6 +19,7 @@
     "@types/node": "^20.12.7",
     "@vitejs/plugin-vue": "^5.0.4",
     "typescript": "^5.4.5",
+    "vercel": "^65.12.1",
     "vite": "^5.2.8",
     "vitest": "^1.5.0",
     "vue-tsc": "^2.0.13"
