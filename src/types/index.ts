@@ -65,3 +65,6 @@ export interface KeywordDiff {
   missing: string[]
   extra: string[]   // 简历里有、但 JD 没要求的
 }
+
+/** 评分这一次请求的返回，字段都是从 Analysis 里挑的，不另造一套 */
+export type ScoreResult = Pick<Analysis, 'score' | 'dimensions' | 'summary' | 'matched' | 'missing'>

@@ -1,11 +1,14 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import TextPanel from '@/components/common/TextPanel.vue'
 import KeywordTags from '@/components/common/KeywordTags.vue'
 import StreamBlock from '@/components/common/StreamBlock.vue'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { useAIStream } from '@/composables/useAIStream'
+import { SCORE_SYSTEM, buildScoreUser } from '@/prompts/score'
+import { safeParseJSON } from '@/utils/safeParseJSON'
+import type { ScoreResult } from '@/types'
 import {
   SAMPLE_COMPANY,
   SAMPLE_JOB,
@@ -30,6 +33,60 @@ function tryStream() {
 const hasAnyText = computed(
   () => store.resumeText.trim().length > 0 || store.jobText.trim().length > 0,
 )
+
+// W2D4 临时试跑区：只为确认分数能真的取出来，D5 做 ScoreRing 时搬进 useScore
+const score = ref<number | null>(null)
+const scoring = ref(false)
+const scoreErr = ref<string | null>(null)
+
+async function doScore() {
+  scoring.value = true
+  scoreErr.value = null
+  score.value = null
+
+  try {
+    const res = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        system: SCORE_SYSTEM,
+        user: buildScoreUser(store.resumeText, store.jobText),
+        // 非流式：评分结果要一次拿全。半截 JSON 是 parse 不出来的，
+        // 流式在这里没有意义（这也是排期文档 D4 改需求的原因）
+        stream: false,
+        // 让代理补上 response_format: json_object
+        json: true,
+        // 评分要稳定，温度压低；0.2 比默认 0.3 更不容易每次给不同分数
+        temperature: 0.2,
+      }),
+    })
+
+    // 代理失败时返回的是 { error, detail }，先看状态码再读 body
+    if (!res.ok) {
+      const info = await res.json().catch(() => null)
+      throw new Error(`HTTP ${res.status} ${String(info?.detail ?? '').slice(0, 60)}`)
+    }
+
+    // 关键：非流式分支是把上游原始响应原样透传回来的，
+    // 结构是 { choices: [{ message: { content: "..." } }] }，
+    // content 才是模型吐的那段文字，不是 score 对象本身
+    const data = await res.json()
+    const content: string = data.choices?.[0]?.message?.content ?? ''
+
+    const obj = safeParseJSON<ScoreResult>(content)
+    if (!obj) throw new Error('模型返回的不是合法 JSON')
+
+    // 解析成功 ≠ 数据可用：模型可能给 "80分" / 800 / -5。
+    // 一律收敛成 0-100 的整数，宁可显示 0 也不让页面出现 NaN
+    const n = Number(obj.score)
+    score.value = Number.isFinite(n) ? Math.min(100, Math.max(0, Math.round(n))) : 0
+  } catch (e: any) {
+    scoreErr.value = e?.message ?? '评分失败'
+  } finally {
+    // 和 useAIStream 一个道理：无论成败都要关 loading，否则按钮永远卡在「评分中」
+    scoring.value = false
+  }
+}
 
 /** 一键填入示例数据，方便第一次打开的人先看效果 */
 function fillSample() {
@@ -116,6 +173,19 @@ function handleAnalyze() {
 
       <p v-if="error" class="text-sm err">{{ error }}</p>
       <StreamBlock :text="text" :loading="loading" />
+    </section>
+
+    <section class="card card-pad">
+      <div class="section-head">
+        <h2 class="section-title">评分试跑（临时）</h2>
+        <button class="btn btn-sm" :disabled="scoring || !store.canAnalyze" @click="doScore">
+          {{ scoring ? '评分中…' : '试跑评分' }}
+        </button>
+      </div>
+
+      <p v-if="scoreErr" class="text-sm err">{{ scoreErr }}</p>
+      <p v-else-if="score !== null" class="text-sm">得分：{{ score }}</p>
+      <p v-else class="text-sm text-3">点上面的按钮，3-5 秒出分。</p>
     </section>
 
     <section class="card card-pad action">
