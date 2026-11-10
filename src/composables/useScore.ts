@@ -24,6 +24,12 @@ function clamp100(value: unknown): number {
   return Math.min(100, Math.max(0, Math.round(n)))
 }
 
+/** 去重并统一成字符串数组：模型偶尔把同一个词说两遍，标签会重复，v-for 的 key 也会撞 */
+function unique(list: unknown): string[] {
+  if (!Array.isArray(list)) return []
+  return [...new Set(list.map(String))]
+}
+
 export function useScore() {
   const result = ref<ScoreResult | null>(null)
   const loading = ref(false)
@@ -85,8 +91,8 @@ export function useScore() {
         dimensions,
         summary: String(obj.summary ?? ''),
         // 不是数组就当空数组：模板里要做 .length 和 map，undefined 会当场炸
-        matched: Array.isArray(obj.matched) ? obj.matched.map(String) : [],
-        missing: Array.isArray(obj.missing) ? obj.missing.map(String) : [],
+        matched: unique(obj.matched),
+        missing: unique(obj.missing),
       }
     } catch (e: any) {
       error.value = e?.message ?? '评分失败'

@@ -5,6 +5,7 @@ import TextPanel from '@/components/common/TextPanel.vue'
 import KeywordTags from '@/components/common/KeywordTags.vue'
 import StreamBlock from '@/components/common/StreamBlock.vue'
 import ScoreRing from '@/components/common/ScoreRing.vue'
+import DimensionBars from '@/components/common/DimensionBars.vue'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { useAIStream } from '@/composables/useAIStream'
 import { useScore } from '@/composables/useScore'
@@ -144,17 +145,17 @@ function handleAnalyze() {
           <p class="text-sm text-2 score-summary">{{ result.summary }}</p>
         </div>
 
-        <!-- 临时用文字列出维度，第 3 步换成 DimensionBars -->
-        <ul class="dims-tmp">
-          <li v-for="d in result.dimensions" :key="d.name">
-            {{ d.name }} · {{ d.score }}
-            <span class="text-xs text-3">{{ d.comment }}</span>
-          </li>
-        </ul>
+        <div class="divider" />
 
-        <p class="text-xs text-3">
-          AI 判定命中 {{ result.matched.length }} 项，缺失 {{ result.missing.length }} 项
-        </p>
+        <DimensionBars :items="result.dimensions" />
+
+        <div class="divider" />
+
+        <!-- 模型偶尔返回整句而不是技能名，标签会撑成两行，先截 16 字 -->
+        <KeywordTags
+          :matched="result.matched.map((k) => k.slice(0, 16))"
+          :missing="result.missing.map((k) => k.slice(0, 16))"
+        />
       </template>
 
       <p v-else class="text-sm text-3">点上面的按钮，3-5 秒出分。</p>
@@ -286,15 +287,10 @@ function handleAnalyze() {
   line-height: 1.6;
 }
 
-.dims-tmp {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin: 10px 0;
-  padding: 0;
-  list-style: none;
-  font-size: 13px;
-  color: var(--c-text-2);
+.divider {
+  height: 1px;
+  margin: 16px 0;
+  background: var(--c-border);
 }
 
 .action {
