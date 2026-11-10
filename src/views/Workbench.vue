@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import TextPanel from '@/components/common/TextPanel.vue'
 import KeywordTags from '@/components/common/KeywordTags.vue'
 import StreamBlock from '@/components/common/StreamBlock.vue'
+import ScoreRing from '@/components/common/ScoreRing.vue'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { useAIStream } from '@/composables/useAIStream'
 import { useScore } from '@/composables/useScore'
@@ -138,10 +139,12 @@ function handleAnalyze() {
       <p v-if="scoreErr" class="text-sm err">{{ scoreErr }}</p>
 
       <template v-else-if="result">
-        <p class="text-sm">得分：{{ result.score }}</p>
-        <p class="text-sm text-2 score-summary">{{ result.summary }}</p>
+        <div class="score-row">
+          <ScoreRing :score="result.score" />
+          <p class="text-sm text-2 score-summary">{{ result.summary }}</p>
+        </div>
 
-        <!-- 临时用文字列出维度，D5 第 2 步换成进度条组件 -->
+        <!-- 临时用文字列出维度，第 3 步换成 DimensionBars -->
         <ul class="dims-tmp">
           <li v-for="d in result.dimensions" :key="d.name">
             {{ d.name }} · {{ d.score }}
@@ -272,8 +275,14 @@ function handleAnalyze() {
   color: var(--c-danger);
 }
 
+.score-row {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+
 .score-summary {
-  margin-top: 4px;
+  margin: 0;
   line-height: 1.6;
 }
 
@@ -304,6 +313,16 @@ function handleAnalyze() {
 @media (max-width: 640px) {
   .page-title {
     font-size: 19px;
+  }
+
+  .score-row {
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .score-summary {
+    text-align: center;
   }
 
   .action {
