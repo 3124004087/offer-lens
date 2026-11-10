@@ -3,11 +3,9 @@ import { computed } from 'vue'
 import { useRouter } from 'vue-router'
 import TextPanel from '@/components/common/TextPanel.vue'
 import KeywordTags from '@/components/common/KeywordTags.vue'
-import StreamBlock from '@/components/common/StreamBlock.vue'
 import ScoreRing from '@/components/common/ScoreRing.vue'
 import DimensionBars from '@/components/common/DimensionBars.vue'
 import { useWorkspaceStore } from '@/stores/workspace'
-import { useAIStream } from '@/composables/useAIStream'
 import { useScore } from '@/composables/useScore'
 import {
   SAMPLE_COMPANY,
@@ -19,24 +17,34 @@ import {
 const store = useWorkspaceStore()
 const router = useRouter()
 
-// W2D2 临时试跑区：只为肉眼确认「字是一个一个出来的」，D5 接进结果页后删掉
-const { text, loading, error, run } = useAIStream()
-
-function tryStream() {
-  run({
-    system: '你是前端面试官，只输出点评，不要客套话。',
-    // 截 300 字，省 token 也省时间，验证流式不需要长文
-    user: `用 80 字点评这段简历：${store.resumeText.slice(0, 300)}`,
-  })
-}
-
 const hasAnyText = computed(
   () => store.resumeText.trim().length > 0 || store.jobText.trim().length > 0,
 )
 
-// W2D5：评分逻辑已搬进 useScore，这里只留渲染
-// scoring / scoreErr 是改名后的 loading / error —— 上面流式那套已经占了 loading、error 两个名字
-const { result, loading: scoring, error: scoreErr, run: runScore } = useScore()
+// 评分逻辑在 useScore 里，这里只留渲染
+// 流式试跑区已删（W2D2 用来肉眼确认逐字输出的），useAIStream.ts 文件本身保留，W3 改写要用
+const { result, loading, error, run } = useScore()
+
+/**
+ * 只在开发环境出现：把脏数据直接塞进 result，验证渲染层扛不扛得住。
+ * 不花 token、不用等 3 秒，改个数字立刻能看到破版。
+ * build 之后 import.meta.env.DEV 是 false，这个按钮不会出现在线上。
+ */
+const isDev = import.meta.env.DEV
+
+function fillFake() {
+  result.value = {
+    score: 120, // 超上限
+    summary: '假数据：总分超上限，两个维度分别给了 800 和 -20，用来看布局会不会破',
+    matched: ['Vue3', 'TypeScript'],
+    missing: ['Node.js', '这是一句特别长的描述超过十六个字就会被截断掉'],
+    dimensions: [
+      { name: '技术栈匹配', score: 800, comment: '假数据，看进度条会不会撑出卡片' },
+      { name: '项目深度', score: -20, comment: '假数据，负数应该被压成 0' },
+      { name: '表达清晰度', score: 66, comment: '' },
+    ],
+  }
+}
 
 /** 一键填入示例数据，方便第一次打开的人先看效果 */
 function fillSample() {
@@ -115,29 +123,20 @@ function handleAnalyze() {
 
     <section class="card card-pad">
       <div class="section-head">
-        <h2 class="section-title">流式试跑（临时）</h2>
-        <button class="btn btn-sm" :disabled="loading || !store.resumeText" @click="tryStream">
-          {{ loading ? '生成中…' : '试跑' }}
-        </button>
+        <h2 class="section-title">AI 评分（临时）</h2>
+        <div class="head-actions">
+          <button v-if="isDev" class="btn btn-sm" @click="fillFake">灌脏数据</button>
+          <button
+            class="btn btn-sm"
+            :disabled="loading || !store.canAnalyze"
+            @click="run(store.resumeText, store.jobText)"
+          >
+            {{ loading ? '评分中…' : '试跑评分' }}
+          </button>
+        </div>
       </div>
 
       <p v-if="error" class="text-sm err">{{ error }}</p>
-      <StreamBlock :text="text" :loading="loading" />
-    </section>
-
-    <section class="card card-pad">
-      <div class="section-head">
-        <h2 class="section-title">评分试跑（临时）</h2>
-        <button
-          class="btn btn-sm"
-          :disabled="scoring || !store.canAnalyze"
-          @click="runScore(store.resumeText, store.jobText)"
-        >
-          {{ scoring ? '评分中…' : '试跑评分' }}
-        </button>
-      </div>
-
-      <p v-if="scoreErr" class="text-sm err">{{ scoreErr }}</p>
 
       <template v-else-if="result">
         <div class="score-row">
