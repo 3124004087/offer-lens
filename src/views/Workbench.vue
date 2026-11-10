@@ -1,14 +1,12 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed } from 'vue'
 import { useRouter } from 'vue-router'
 import TextPanel from '@/components/common/TextPanel.vue'
 import KeywordTags from '@/components/common/KeywordTags.vue'
 import StreamBlock from '@/components/common/StreamBlock.vue'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { useAIStream } from '@/composables/useAIStream'
-import { SCORE_SYSTEM, buildScoreUser } from '@/prompts/score'
-import { safeParseJSON } from '@/utils/safeParseJSON'
-import type { ScoreResult } from '@/types'
+import { useScore } from '@/composables/useScore'
 import {
   SAMPLE_COMPANY,
   SAMPLE_JOB,
@@ -34,59 +32,9 @@ const hasAnyText = computed(
   () => store.resumeText.trim().length > 0 || store.jobText.trim().length > 0,
 )
 
-// W2D4 临时试跑区：只为确认分数能真的取出来，D5 做 ScoreRing 时搬进 useScore
-const score = ref<number | null>(null)
-const scoring = ref(false)
-const scoreErr = ref<string | null>(null)
-
-async function doScore() {
-  scoring.value = true
-  scoreErr.value = null
-  score.value = null
-
-  try {
-    const res = await fetch('/api/chat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        system: SCORE_SYSTEM,
-        user: buildScoreUser(store.resumeText, store.jobText),
-        // 非流式：评分结果要一次拿全。半截 JSON 是 parse 不出来的，
-        // 流式在这里没有意义（这也是排期文档 D4 改需求的原因）
-        stream: false,
-        // 让代理补上 response_format: json_object
-        json: true,
-        // 评分要稳定，温度压低；0.2 比默认 0.3 更不容易每次给不同分数
-        temperature: 0.2,
-      }),
-    })
-
-    // 代理失败时返回的是 { error, detail }，先看状态码再读 body
-    if (!res.ok) {
-      const info = await res.json().catch(() => null)
-      throw new Error(`HTTP ${res.status} ${String(info?.detail ?? '').slice(0, 60)}`)
-    }
-
-    // 关键：非流式分支是把上游原始响应原样透传回来的，
-    // 结构是 { choices: [{ message: { content: "..." } }] }，
-    // content 才是模型吐的那段文字，不是 score 对象本身
-    const data = await res.json()
-    const content: string = data.choices?.[0]?.message?.content ?? ''
-
-    const obj = safeParseJSON<ScoreResult>(content)
-    if (!obj) throw new Error('模型返回的不是合法 JSON')
-
-    // 解析成功 ≠ 数据可用：模型可能给 "80分" / 800 / -5。
-    // 一律收敛成 0-100 的整数，宁可显示 0 也不让页面出现 NaN
-    const n = Number(obj.score)
-    score.value = Number.isFinite(n) ? Math.min(100, Math.max(0, Math.round(n))) : 0
-  } catch (e: any) {
-    scoreErr.value = e?.message ?? '评分失败'
-  } finally {
-    // 和 useAIStream 一个道理：无论成败都要关 loading，否则按钮永远卡在「评分中」
-    scoring.value = false
-  }
-}
+// W2D5：评分逻辑已搬进 useScore，这里只留渲染
+// scoring / scoreErr 是改名后的 loading / error —— 上面流式那套已经占了 loading、error 两个名字
+const { result, loading: scoring, error: scoreErr, run: runScore } = useScore()
 
 /** 一键填入示例数据，方便第一次打开的人先看效果 */
 function fillSample() {
@@ -178,13 +126,34 @@ function handleAnalyze() {
     <section class="card card-pad">
       <div class="section-head">
         <h2 class="section-title">评分试跑（临时）</h2>
-        <button class="btn btn-sm" :disabled="scoring || !store.canAnalyze" @click="doScore">
+        <button
+          class="btn btn-sm"
+          :disabled="scoring || !store.canAnalyze"
+          @click="runScore(store.resumeText, store.jobText)"
+        >
           {{ scoring ? '评分中…' : '试跑评分' }}
         </button>
       </div>
 
       <p v-if="scoreErr" class="text-sm err">{{ scoreErr }}</p>
-      <p v-else-if="score !== null" class="text-sm">得分：{{ score }}</p>
+
+      <template v-else-if="result">
+        <p class="text-sm">得分：{{ result.score }}</p>
+        <p class="text-sm text-2 score-summary">{{ result.summary }}</p>
+
+        <!-- 临时用文字列出维度，D5 第 2 步换成进度条组件 -->
+        <ul class="dims-tmp">
+          <li v-for="d in result.dimensions" :key="d.name">
+            {{ d.name }} · {{ d.score }}
+            <span class="text-xs text-3">{{ d.comment }}</span>
+          </li>
+        </ul>
+
+        <p class="text-xs text-3">
+          AI 判定命中 {{ result.matched.length }} 项，缺失 {{ result.missing.length }} 项
+        </p>
+      </template>
+
       <p v-else class="text-sm text-3">点上面的按钮，3-5 秒出分。</p>
     </section>
 
@@ -301,6 +270,22 @@ function handleAnalyze() {
 
 .err {
   color: var(--c-danger);
+}
+
+.score-summary {
+  margin-top: 4px;
+  line-height: 1.6;
+}
+
+.dims-tmp {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 10px 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+  color: var(--c-text-2);
 }
 
 .action {
