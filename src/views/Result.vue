@@ -1,15 +1,34 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
 import KeywordTags from '@/components/common/KeywordTags.vue'
+import ScoreRing from '@/components/common/ScoreRing.vue'
+import DimensionBars from '@/components/common/DimensionBars.vue'
 import { useWorkspaceStore } from '@/stores/workspace'
+import { useAnalysisStore } from '@/stores/analysis'
 
 const route = useRoute()
 const store = useWorkspaceStore()
+const analysis = useAnalysisStore()
 
-const isLocalMode = computed(() => route.params.id === 'local')
+/** 按 id 找不到结果时显示的态：别人分享的链接、关掉标签页后再打开，都会走到这 */
+const notFound = ref(false)
 
-/** 关键词覆盖率：命中 / JD 要求总数 */
+onMounted(() => {
+  // 路由参数的类型是 string | string[]（同一参数重复出现才会是数组），统一转成字符串
+  const id = String(route.params.id)
+  // 找不到是正常情况，不是异常：显示空态就好，不要抛错让整页白屏
+  if (!analysis.restore(id)) notFound.value = true
+})
+
+/** 标题里的公司/岗位：优先用分析时存下的快照，没有才退回当前草稿 */
+const meta = computed(() => {
+  const cur = analysis.current
+  if (cur) return { company: cur.company, position: cur.position }
+  return { company: store.company, position: store.position }
+})
+
+/** 关键词覆盖率：命中 / (命中 + 缺失)。本地实时算，不依赖 AI，所以不用存 */
 const total = computed(() => store.keywordDiff.matched.length + store.keywordDiff.missing.length)
 const rate = computed(() =>
   total.value === 0 ? 0 : Math.round((store.keywordDiff.matched.length / total.value) * 100),
@@ -29,13 +48,48 @@ const rateHint = computed(() => {
       <div>
         <RouterLink to="/" class="back text-sm text-2">← 返回工作台</RouterLink>
         <h1 class="page-title">分析结果</h1>
-        <p v-if="store.company || store.position" class="text-2">
-          {{ store.company || '未填写公司' }} · {{ store.position || '未填写岗位' }}
+        <p v-if="meta.company || meta.position" class="text-2">
+          {{ meta.company || '未填写公司' }} · {{ meta.position || '未填写岗位' }}
         </p>
       </div>
     </header>
 
-    <!-- 本地关键词概览（W1 已完成） -->
+    <!-- AI 分析：有结果就渲染，没有就说清楚为什么没有 -->
+    <section v-if="analysis.current" class="card card-pad">
+      <div class="sec-head">
+        <h2 class="sec-title">AI 深度分析</h2>
+        <span class="text-xs text-3">
+          {{ new Date(analysis.current.createdAt).toLocaleString('zh-CN') }}
+        </span>
+      </div>
+
+      <div class="score-row">
+        <ScoreRing :score="analysis.current.result.score" />
+        <p class="text-sm text-2 summary">{{ analysis.current.result.summary }}</p>
+      </div>
+
+      <div class="divider" />
+
+      <DimensionBars :items="analysis.current.result.dimensions" />
+
+      <div class="divider" />
+
+      <!-- 模型偶尔返回整句而不是技能名，标签会撑成两行，先截 16 字 -->
+      <KeywordTags
+        :matched="analysis.current.result.matched.map((k) => k.slice(0, 16))"
+        :missing="analysis.current.result.missing.map((k) => k.slice(0, 16))"
+      />
+    </section>
+
+    <section v-else-if="notFound" class="card card-pad empty">
+      <h2 class="sec-title">这个结果不在了</h2>
+      <p class="text-sm text-2">
+        分析结果只存在当前标签页里，刷新还在，关掉标签页或换设备就找不回来。
+      </p>
+      <RouterLink to="/" class="btn go-back">回工作台重新分析</RouterLink>
+    </section>
+
+    <!-- 本地关键词概览：W1 就有的能力，不依赖 AI，刷新照样算得出来 -->
     <section class="card card-pad">
       <div class="sec-head">
         <h2 class="sec-title">关键词覆盖率</h2>
@@ -54,23 +108,6 @@ const rateHint = computed(() => {
         :missing="store.keywordDiff.missing"
         :extra="store.keywordDiff.extra"
       />
-    </section>
-
-    <!-- 待接入模块 -->
-    <section class="card card-pad pending">
-      <h2 class="sec-title">AI 深度分析</h2>
-      <p class="text-sm text-2">
-        这一块还没有接上。按排期会在 W2 ~ W3 完成：
-      </p>
-      <ul class="todo">
-        <li><span class="tag tag-neutral">W2</span> 匹配度评分（总分 + 三维度 + 一句话点评）</li>
-        <li><span class="tag tag-neutral">W3</span> 逐段改写建议（原句 / 建议 / 为什么改）</li>
-        <li><span class="tag tag-neutral">W3</span> 面试题预测（基础 / 项目 / 场景）</li>
-        <li><span class="tag tag-neutral">W4</span> 历史记录与结果持久化</li>
-      </ul>
-      <p class="text-xs text-3 note">
-        提示：这些是排期占位，不是 bug。先把本地能力打磨好，再接 AI。
-      </p>
     </section>
   </div>
 </template>
@@ -98,6 +135,7 @@ const rateHint = computed(() => {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
+  gap: 12px;
   margin-bottom: 10px;
 }
 
@@ -137,36 +175,44 @@ const rateHint = computed(() => {
   background: var(--c-border);
 }
 
-.pending {
+.score-row {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+
+.summary {
+  margin: 0;
+  line-height: 1.6;
+}
+
+.empty {
   display: flex;
   flex-direction: column;
+  align-items: flex-start;
   gap: 10px;
 }
 
-.todo {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.todo li {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+.go-back {
+  min-height: 36px;
+  padding: 0 14px;
   font-size: 13px;
-  color: var(--c-text-2);
-}
-
-.note {
-  margin-top: 2px;
+  border-radius: var(--radius-sm);
 }
 
 @media (max-width: 640px) {
   .page-title {
     font-size: 19px;
+  }
+
+  .score-row {
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .summary {
+    text-align: center;
   }
 }
 </style>

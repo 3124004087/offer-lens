@@ -3,9 +3,8 @@ import { computed } from 'vue'
 import { useRouter } from 'vue-router'
 import TextPanel from '@/components/common/TextPanel.vue'
 import KeywordTags from '@/components/common/KeywordTags.vue'
-import ScoreRing from '@/components/common/ScoreRing.vue'
-import DimensionBars from '@/components/common/DimensionBars.vue'
 import { useWorkspaceStore } from '@/stores/workspace'
+import { useAnalysisStore } from '@/stores/analysis'
 import { useScore } from '@/composables/useScore'
 import {
   SAMPLE_COMPANY,
@@ -15,36 +14,16 @@ import {
 } from '@/data/samples'
 
 const store = useWorkspaceStore()
+const analysis = useAnalysisStore()
 const router = useRouter()
 
 const hasAnyText = computed(
   () => store.resumeText.trim().length > 0 || store.jobText.trim().length > 0,
 )
 
-// 评分逻辑在 useScore 里，这里只留渲染
-// 流式试跑区已删（W2D2 用来肉眼确认逐字输出的），useAIStream.ts 文件本身保留，W3 改写要用
+// 评分逻辑在 useScore 里，这个页面只负责「什么时候调、调完去哪」
+// W2D2 的流式试跑区已删（那个只用来肉眼确认逐字输出），useAIStream.ts 文件保留，W3 改写要用
 const { result, loading, error, run } = useScore()
-
-/**
- * 只在开发环境出现：把脏数据直接塞进 result，验证渲染层扛不扛得住。
- * 不花 token、不用等 3 秒，改个数字立刻能看到破版。
- * build 之后 import.meta.env.DEV 是 false，这个按钮不会出现在线上。
- */
-const isDev = import.meta.env.DEV
-
-function fillFake() {
-  result.value = {
-    score: 120, // 超上限
-    summary: '假数据：总分超上限，两个维度分别给了 800 和 -20，用来看布局会不会破',
-    matched: ['Vue3', 'TypeScript'],
-    missing: ['Node.js', '这是一句特别长的描述超过十六个字就会被截断掉'],
-    dimensions: [
-      { name: '技术栈匹配', score: 800, comment: '假数据，看进度条会不会撑出卡片' },
-      { name: '项目深度', score: -20, comment: '假数据，负数应该被压成 0' },
-      { name: '表达清晰度', score: 66, comment: '' },
-    ],
-  }
-}
 
 /** 一键填入示例数据，方便第一次打开的人先看效果 */
 function fillSample() {
@@ -54,10 +33,22 @@ function fillSample() {
   store.position = SAMPLE_POSITION
 }
 
-function handleAnalyze() {
-  if (!store.canAnalyze) return
-  // W1 阶段：只有本地关键词结果，AI 分析在 W2 接入
-  router.push('/result/local')
+/**
+ * 主链路：读内容 → 请求评分 → 存结果 → 跳 /result/:id
+ *
+ * 为什么失败不跳：run 内部已经把错误接住了（失败时 result 为 null、error 有内容）。
+ * 这时候跳过去，用户只看到「结果不在了」的空态，根本不知道是 Key 错了还是网断了。
+ * 错误必须留在当前页，就显示在按钮旁边。
+ */
+async function handleAnalyze() {
+  if (!store.canAnalyze || loading.value) return
+
+  await run(store.resumeText, store.jobText)
+  if (!result.value) return
+
+  // 存完拿到 id，URL 只带这个 id，数据在 store + sessionStorage 里
+  const id = analysis.saveScore(result.value, store.company, store.position)
+  router.push(`/result/${id}`)
 }
 </script>
 
@@ -121,56 +112,24 @@ function handleAnalyze() {
       <p v-else class="text-sm text-3">还什么都没填。先粘一段内容试试。</p>
     </section>
 
-    <section class="card card-pad">
-      <div class="section-head">
-        <h2 class="section-title">AI 评分（临时）</h2>
-        <div class="head-actions">
-          <button v-if="isDev" class="btn btn-sm" @click="fillFake">灌脏数据</button>
-          <button
-            class="btn btn-sm"
-            :disabled="loading || !store.canAnalyze"
-            @click="run(store.resumeText, store.jobText)"
-          >
-            {{ loading ? '评分中…' : '试跑评分' }}
-          </button>
-        </div>
-      </div>
-
-      <p v-if="error" class="text-sm err">{{ error }}</p>
-
-      <template v-else-if="result">
-        <div class="score-row">
-          <ScoreRing :score="result.score" />
-          <p class="text-sm text-2 score-summary">{{ result.summary }}</p>
-        </div>
-
-        <div class="divider" />
-
-        <DimensionBars :items="result.dimensions" />
-
-        <div class="divider" />
-
-        <!-- 模型偶尔返回整句而不是技能名，标签会撑成两行，先截 16 字 -->
-        <KeywordTags
-          :matched="result.matched.map((k) => k.slice(0, 16))"
-          :missing="result.missing.map((k) => k.slice(0, 16))"
-        />
-      </template>
-
-      <p v-else class="text-sm text-3">点上面的按钮，3-5 秒出分。</p>
-    </section>
-
     <section class="card card-pad action">
       <div class="action-info">
-        <p v-if="store.disabledReason" class="text-sm text-2">{{ store.disabledReason }}</p>
+        <p v-if="error" class="text-sm err">{{ error }}</p>
+        <p v-else-if="store.disabledReason" class="text-sm text-2">{{ store.disabledReason }}</p>
         <p v-else class="text-sm text-2">
           已就绪：命中 {{ store.keywordDiff.matched.length }} 项，缺失
           {{ store.keywordDiff.missing.length }} 项
         </p>
-        <p class="text-xs text-3">内容会自动保存在本地，刷新不丢</p>
+        <p class="text-xs text-3">
+          {{ loading ? 'AI 正在读简历和 JD，大概 3-5 秒' : '内容会自动保存在本地，刷新不丢' }}
+        </p>
       </div>
-      <button class="btn btn-primary" :disabled="!store.canAnalyze" @click="handleAnalyze">
-        开始分析
+      <button
+        class="btn btn-primary"
+        :disabled="!store.canAnalyze || loading"
+        @click="handleAnalyze"
+      >
+        {{ loading ? '分析中…' : '开始分析' }}
       </button>
     </section>
   </div>
@@ -275,23 +234,6 @@ function handleAnalyze() {
   color: var(--c-danger);
 }
 
-.score-row {
-  display: flex;
-  align-items: center;
-  gap: 20px;
-}
-
-.score-summary {
-  margin: 0;
-  line-height: 1.6;
-}
-
-.divider {
-  height: 1px;
-  margin: 16px 0;
-  background: var(--c-border);
-}
-
 .action {
   display: flex;
   align-items: center;
@@ -308,16 +250,6 @@ function handleAnalyze() {
 @media (max-width: 640px) {
   .page-title {
     font-size: 19px;
-  }
-
-  .score-row {
-    flex-direction: column;
-    align-items: center;
-    gap: 12px;
-  }
-
-  .score-summary {
-    text-align: center;
   }
 
   .action {
