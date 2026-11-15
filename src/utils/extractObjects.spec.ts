@@ -2,12 +2,19 @@ import { describe, it, expect } from 'vitest'
 import { extractObjects } from './extractObjects'
 
 /**
- * 五条用例各锁一个真实 bug 面：
+ * 用例各锁一个真实 bug 面：
  *   1 空输入不炸        —— AI 流开始前 buffer 就是空的
  *   2 完整对象全收      —— 正常收尾时一条不丢
  *   3 半截不抛错且不收  —— 流式 90% 的时间都在这种状态
  *   4 字符串里的花括号  —— 不处理 instring 会整条丢失
- *   5 逐字到达只增不减  —— 界面上已出现的内容不能闪一下消失
+ *   5 转义引号          —— 字符串边界认错 → 配平全乱
+ *   6 逐字到达只增不减  —— 界面上已出现的内容不能闪一下消失
+ *   7 带壳半截也能收    —— json_object 强制顶层是对象，这才是真实形状
+ *   8 壳收尾会整体解析一次 —— 已知取舍，业务过滤归 useRewrite
+ *
+ * 第 7 条是关键：最早版本只在「深度回到 0」时收对象，裸数组的用例全绿，
+ * 但真实流是 {"items":[...]}，条目在第 1 层，等回 0 已整体结束——
+ * 用例全绿掩盖了形状不一致（W2 的老课）。
  */
 describe('extractObjects', () => {
   it('空串返回空数组，不抛错', () => {
@@ -55,5 +62,20 @@ describe('extractObjects', () => {
     }
     // 扫到最后一字时，三个都在
     expect(prev).toBe(3)
+  })
+
+  it('带 {"items":[...]} 外壳、第二条还没写完时，第一条已能捞出', () => {
+    // json_object 模式强制顶层是对象，真实流就是这个形状。
+    // 这条是整个函数存在的理由：不带壳用例全绿的版本，在这里会返回空数组
+    expect(extractObjects('{"items":[{"a":1},{"b":')).toEqual([{ a: 1 }])
+  })
+
+  it('外壳收尾时会被整体解析一次（已知取舍，业务过滤归 useRewrite）', () => {
+    const out = extractObjects('{"items":[{"a":1},{"b":2}]}')
+    // 前两个是条目；最后一个是整体收尾时解析出来的壳，它没有业务字段
+    expect(out).toHaveLength(3)
+    expect(out[0]).toEqual({ a: 1 })
+    expect(out[1]).toEqual({ b: 2 })
+    expect(out[2]).toEqual({ items: [{ a: 1 }, { b: 2 }] })
   })
 })
