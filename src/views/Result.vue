@@ -4,12 +4,24 @@ import { RouterLink, useRoute } from 'vue-router'
 import KeywordTags from '@/components/common/KeywordTags.vue'
 import ScoreRing from '@/components/common/ScoreRing.vue'
 import DimensionBars from '@/components/common/DimensionBars.vue'
+import RewriteCard from '@/components/common/RewriteCard.vue'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { useAnalysisStore } from '@/stores/analysis'
+import { useRewrite } from '@/composables/useRewrite'
 
 const route = useRoute()
 const store = useWorkspaceStore()
 const analysis = useAnalysisStore()
+
+// 改写这条支线独立成 composable：它要流式、要边收边画，跟评分的非流式是两套逻辑。
+// list 改名叫 rewrites 是为了下面模板里读起来不像数组下标
+const {
+  list: rewrites,
+  loading: rewriting,
+  error: rewriteError,
+  run: runRewrite,
+  stop: stopRewrite,
+} = useRewrite()
 
 /** 按 id 找不到结果时显示的态：别人分享的链接、关掉标签页后再打开，都会走到这 */
 const notFound = ref(false)
@@ -40,6 +52,35 @@ const rateHint = computed(() => {
   if (rate.value >= 50) return '基本功够了，缺的这几项面试大概率会问'
   return '差距明显，建议先补齐缺失项再投'
 })
+
+/**
+ * 改写要读简历和 JD 原文，所以不能只看「有没有分析结果」。
+ * 从别人分享的链接进来时，store 是空的（原文没跟着 URL 走），
+ * 这时候点按钮只会请求一个空字符串，白烧一次 token，所以先挡住。
+ */
+const canRewrite = computed(
+  () => store.resumeText.trim().length >= 100 && store.jobText.trim().length >= 100,
+)
+
+/** 一句话说明「现在为什么能点 / 为什么点了没反应」 */
+const rewriteHint = computed(() => {
+  if (rewriting.value) return '正在逐句改写，收到的条目会先显示出来，大概 15 秒。'
+  if (rewrites.value.length > 0) return ''
+  if (!canRewrite.value) {
+    return '这个页面拿不到完整的简历和 JD（可能是别人分享的链接）。改写要读原文，回工作台重新粘一次。'
+  }
+  return 'AI 会从简历里挑 3-6 句逐句改写，按 JD 补上缺的关键词。'
+})
+
+/**
+ * 改写不跟着页面加载自动跑：一进结果页就烧 900 个 token，
+ * 失败了还只能刷新重来。按钮触发 = 用户知道自己在花钱，也留了重试的位置。
+ */
+async function handleRewrite() {
+  if (!canRewrite.value || rewriting.value) return
+  // missing 是本地算好的差距，直接喂给模型：省 token，输出也更贴 JD
+  await runRewrite(store.resumeText, store.jobText, store.keywordDiff.missing)
+}
 </script>
 
 <template>
@@ -109,6 +150,26 @@ const rateHint = computed(() => {
         :extra="store.keywordDiff.extra"
       />
     </section>
+
+    <!-- 改写：放在覆盖率后面，读起来是「先看差多少 → 再看怎么补」 -->
+    <section class="card card-pad">
+      <div class="sec-head">
+        <h2 class="sec-title">简历改写建议</h2>
+        <span v-if="rewrites.length" class="text-xs text-3">{{ rewrites.length }} 条</span>
+      </div>
+
+      <p v-if="rewriteHint" class="text-sm text-2 hint">{{ rewriteHint }}</p>
+
+      <!-- 生成中只留「停止」，生成完就不再显示按钮：按钮消失本身就是「已经做过了」的信号 -->
+      <div v-if="rewriting || !rewrites.length" class="rw-actions">
+        <button v-if="rewriting" class="btn" @click="stopRewrite">停止生成</button>
+        <button v-else class="btn btn-primary" :disabled="!canRewrite" @click="handleRewrite">
+          生成改写建议
+        </button>
+      </div>
+
+      <RewriteCard :items="rewrites" :loading="rewriting" :error="rewriteError" />
+    </section>
   </div>
 </template>
 
@@ -167,6 +228,10 @@ const rateHint = computed(() => {
 
 .hint {
   margin-top: 8px;
+}
+
+.rw-actions {
+  margin-top: 12px;
 }
 
 .divider {
