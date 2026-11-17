@@ -155,16 +155,19 @@ export function useQuestions() {
   }
 
   /**
-   * 自评：会 ↔ 不会。
+   * 自评：会 / 不会。
+   *
+   * 传值而不是「切换」：卡片上有「会」「不会」两个按钮，
+   * 如果只做成 toggle，重复点「不会」会翻成「会」，等于按自己的理解反了。
    *
    * 直接改数组里那个对象的属性，不整份换引用 —— ref 里存的是响应式代理，
    * 改属性照样触发更新，比 list.value = list.value.map(...) 省一次全量渲染。
    * 更关键的是：状态挂在父级数组上，子组件切 Tab 被卸载也不影响它（今天的八股）。
    */
-  function toggleMastered(id: string) {
+  function setMastered(id: string, value: boolean) {
     const hit = list.value.find((q) => q.id === id)
     if (!hit) return
-    hit.mastered = !hit.mastered
+    hit.mastered = value
   }
 
   /** 换一份简历重新出题时清空，避免旧题混在新题里 */
@@ -173,5 +176,5 @@ export function useQuestions() {
     error.value = null
   }
 
-  return { list, loading, error, masteredCount, run, toggleMastered, reset }
+  return { list, loading, error, masteredCount, run, setMastered, reset }
 }

@@ -170,6 +170,18 @@ async function handleRewrite() {
 
       <RewriteCard :items="rewrites" :loading="rewriting" :error="rewriteError" />
     </section>
+
+    <!-- 结果页是「诊断」，下一步是「练」。这里只放一个入口，不把题目塞进本页：
+         出题是另一次请求，塞进来会让结果页一次烧两份额度 -->
+    <section v-if="analysis.current" class="card card-pad next">
+      <div class="next-text">
+        <h2 class="sec-title">接下来练什么</h2>
+        <p class="text-sm text-2">按这份 JD 出 8 道预测题，基础 / 项目 / 场景各一组。</p>
+      </div>
+      <RouterLink :to="`/questions/${analysis.current.id}`" class="btn next-btn">
+        去做面试题 →
+      </RouterLink>
+    </section>
   </div>
 </template>
 
@@ -265,9 +277,37 @@ async function handleRewrite() {
   border-radius: var(--radius-sm);
 }
 
+.next {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.next-text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.next-btn {
+  flex: none;
+  min-height: 36px;
+  padding: 0 14px;
+  font-size: 13px;
+  border-radius: var(--radius-sm);
+  text-decoration: none;
+}
+
 @media (max-width: 640px) {
   .page-title {
     font-size: 19px;
+  }
+
+  /* 窄屏上下排：一行放不下「说明 + 按钮」，按钮会被挤成两行字 */
+  .next {
+    flex-direction: column;
+    align-items: flex-start;
   }
 
   .score-row {
