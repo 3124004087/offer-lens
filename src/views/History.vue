@@ -50,6 +50,44 @@ async function toggleApplied(item: SavedAnalysis) {
   const saved = await analysis.patch(item.id, { applied: item.applied })
   if (!saved) item.applied = before
 }
+
+/** 哪一行的删除按钮已经按了第一下、正在等第二下。null = 没有任何一行在等 */
+const confirmId = ref<string | null>(null)
+
+/** 删除失败的提示。删除失败必须让用户看见，不能悄悄什么都没发生 */
+const delError = ref('')
+
+/**
+ * 删除要按两下。
+ *
+ * 第一下只是「上膛」：把这一行的 id 记进 confirmId，按钮文案变成「确认删除」，数据不动。
+ * 第二下才真的删。为什么不做成「点一下就删 + 弹窗问一次」：弹窗会打断操作，
+ * 而且刚点完就弹出来，很容易顺手点掉「确定」—— 两道门槛反而比一道更松。
+ *
+ * 和上面「标记已投递」的关键差别：那边是乐观更新（先改界面再写库），
+ * 这边必须等 remove 返回 true 才动列表 —— 删错了没法撤回。
+ */
+async function handleDelete(item: SavedAnalysis) {
+  // 第一下：只标记「哪一行在等确认」，不动数据
+  if (confirmId.value !== item.id) {
+    confirmId.value = item.id
+    delError.value = ''
+    return
+  }
+
+  // 第二下：写库。删成功才从列表里拿掉
+  const ok = await analysis.remove(item.id)
+  if (!ok) {
+    delError.value = '删除失败，可能是浏览器不让写本地数据'
+    confirmId.value = null
+    return
+  }
+
+  // filter（筛选）：留下 id 不等于这一条的，等于把这条剔掉。
+  // 不直接用 splice：filter 会造一个新数组，Vue 一定能察觉到变化
+  list.value = list.value.filter((x) => x.id !== item.id)
+  confirmId.value = null
+}
 </script>
 
 <template>
@@ -83,6 +121,7 @@ async function toggleApplied(item: SavedAnalysis) {
 
     <template v-else>
       <p class="text-xs text-3 list-head">共 {{ list.length }} 条 · 按时间从新到旧</p>
+      <p v-if="delError" class="text-xs del-error">{{ delError }}</p>
 
       <!-- 一条记录 = 一张卡：左边点进去看详情，右边单独标已投递。
            不能把按钮塞进 RouterLink 里 —— 链接里套按钮，点按钮会顺带跳页 -->
@@ -106,14 +145,25 @@ async function toggleApplied(item: SavedAnalysis) {
           </div>
         </RouterLink>
 
-        <button
-          type="button"
-          class="applied"
-          :class="{ on: item.applied }"
-          @click="toggleApplied(item)"
-        >
-          {{ item.applied ? '已投递' : '标记已投递' }}
-        </button>
+        <div class="row-actions">
+          <button
+            type="button"
+            class="applied"
+            :class="{ on: item.applied }"
+            @click="toggleApplied(item)"
+          >
+            {{ item.applied ? '已投递' : '标记已投递' }}
+          </button>
+
+          <button
+            type="button"
+            class="del"
+            :class="{ arming: confirmId === item.id }"
+            @click="handleDelete(item)"
+          >
+            {{ confirmId === item.id ? '确认删除' : '删除' }}
+          </button>
+        </div>
       </article>
     </template>
   </div>
@@ -229,12 +279,48 @@ async function toggleApplied(item: SavedAnalysis) {
   color: var(--c-success);
 }
 
+.row-actions {
+  flex: none;
+  display: flex;
+  gap: 6px;
+}
+
+.del {
+  flex: none;
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--c-border);
+  border-radius: 999px;
+  background: var(--c-surface);
+  color: var(--c-text-3);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.del:hover {
+  border-color: var(--c-danger);
+  color: var(--c-danger);
+}
+
+/* 上膛状态：红底白字。让人一眼看出「这次点下去就没了」 */
+.del.arming {
+  border-color: transparent;
+  background: var(--c-danger);
+  color: #fff;
+}
+
+.del-error {
+  color: var(--c-danger);
+  margin-bottom: -2px;
+}
+
 @media (max-width: 640px) {
   .page-title {
     font-size: 19px;
   }
 
-  /* 窄屏：链接占满一行，按钮换到下一行占满宽度，避免三个元素横着挤 */
+  /* 窄屏：链接占满一行，两个按钮换到下一行各占一半，
+     避免三个元素横着挤成一堆小字 */
   .row {
     flex-wrap: wrap;
   }
@@ -243,7 +329,14 @@ async function toggleApplied(item: SavedAnalysis) {
     flex-basis: 100%;
   }
 
-  .applied {
+  .row-actions {
+    flex-basis: 100%;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .applied,
+  .del {
     width: 100%;
     min-height: 34px;
     border-radius: var(--radius-sm);
