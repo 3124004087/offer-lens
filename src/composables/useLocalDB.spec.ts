@@ -2,6 +2,7 @@
 // 这一层只测「容易写错、写错了又看不出来」的地方：
 // 空库、伪装的 id、删不干净。事务封装本身（utils/idb.ts）由 store 的用例覆盖。
 import 'fake-indexeddb/auto'
+import { isProxy, reactive } from 'vue'
 import { beforeEach, describe, expect, it } from 'vitest'
 import {
   clearAnalyses,
@@ -65,5 +66,20 @@ describe('useLocalDB', () => {
     const list = await listAnalyses()
     expect(list).toHaveLength(1)
     expect(list[0].company).toBe('B')
+  })
+
+  it('响应式对象也能存进去（Proxy 直接进库会报 DataCloneError）', async () => {
+    // 复现线上那个真 bug：saveScore 里 result 来自 useScore 的 ref，
+    // 取出来是 Proxy。不剥成纯数据直接 put，会抛
+    // 「DataCloneError: #<Object> could not be cloned」，
+    // 表现就是「结果页正常、历史页永远是空的」。
+    const item = reactive(makeRecord({ id: 'proxy-1', company: '字节' }))
+    await putAnalysis(item as SavedAnalysis)
+
+    const back = await getAnalysis('proxy-1')
+    expect(back?.company).toBe('字节')
+    // 存进去的必须已经脱离响应式，否则下次 patch 合并时又会带上代理
+    expect(isProxy(back)).toBe(false)
+    expect(isProxy(back?.result)).toBe(false)
   })
 })

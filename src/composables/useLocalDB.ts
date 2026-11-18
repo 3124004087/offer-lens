@@ -25,9 +25,31 @@ export function getAnalysis(id: string): Promise<SavedAnalysis | undefined> {
   return withStore('readonly', (store) => store.get(id) as IDBRequest<SavedAnalysis | undefined>)
 }
 
+/**
+ * 把传进来的东西剥成「纯数据」再进库。
+ *
+ * 这个函数是踩坑之后加的，必须留着：
+ * Vue 的 ref / reactive 包出来的不是普通对象，是 Proxy（代理），
+ * 而 IndexedDB 写盘前要做「结构化克隆」（把对象拆成二进制存起来），
+ * 它只认普通对象和数组，碰到 Proxy 直接抛：
+ *   DataCloneError: Failed to execute 'put' on 'IDBObjectStore': #<Object> could not be cloned
+ *
+ * 真实现象：分析结果页一切正常（内存里有一份），但历史页永远是空的 ——
+ * 因为写库这一步每次都失败了。
+ *
+ * 为什么用 JSON 走一遍而不是 Vue 的 toRaw：toRaw 只剥最外面一层，
+ * 数组元素、嵌套对象里还可能是代理。JSON 一次到底；
+ * 而且「能存进 IndexedDB 的数据」本来就该是 JSON 那几种形状。
+ */
+function toPlain<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T
+}
+
 /** 整条写入（有同 id 就覆盖） */
 export async function putAnalysis(item: SavedAnalysis): Promise<void> {
-  await withStore('readwrite', (store) => store.put(item))
+  // 调用方经常直接传响应式对象（saveScore 里的 result、页面里的 list 元素），
+  // 统一在这里剥一次，比要求每个调用方自己记得 toRaw 靠谱
+  await withStore('readwrite', (store) => store.put(toPlain(item)))
 }
 
 /**
