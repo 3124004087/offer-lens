@@ -92,5 +92,13 @@ export function useRewrite() {
     stream.stop()
   }
 
-  return { list, loading, error, run, stop }
+  /**
+   * 从本地记录里装回上一次的改写结果（刷新、从历史列表点进来时用）。
+   * 只换数据，不发请求 —— 这正是「回看历史不花钱」的实现位置。
+   */
+  function hydrate(items: RewriteItem[]) {
+    list.value = items
+  }
+
+  return { list, loading, error, run, stop, hydrate }
 }

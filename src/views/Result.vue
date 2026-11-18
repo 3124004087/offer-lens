@@ -8,10 +8,13 @@ import RewriteCard from '@/components/common/RewriteCard.vue'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { useAnalysisStore } from '@/stores/analysis'
 import { useRewrite } from '@/composables/useRewrite'
+import { diffKeywords } from '@/composables/useKeywordExtract'
 
 const route = useRoute()
 const store = useWorkspaceStore()
 const analysis = useAnalysisStore()
+
+const id = String(route.params.id)
 
 // 改写这条支线独立成 composable：它要流式、要边收边画，跟评分的非流式是两套逻辑。
 // list 改名叫 rewrites 是为了下面模板里读起来不像数组下标
@@ -21,16 +24,29 @@ const {
   error: rewriteError,
   run: runRewrite,
   stop: stopRewrite,
+  hydrate: hydrateRewrites,
 } = useRewrite()
 
-/** 按 id 找不到结果时显示的态：别人分享的链接、关掉标签页后再打开，都会走到这 */
+/** 按 id 找不到结果时显示的态：记录被清了、链接被转发，都会走到这 */
 const notFound = ref(false)
 
-onMounted(() => {
-  // 路由参数的类型是 string | string[]（同一参数重复出现才会是数组），统一转成字符串
-  const id = String(route.params.id)
+/**
+ * 读本地库是异步的（IndexedDB 没有同步接口）。
+ * 没有这个标记的话，页面会先按「什么都没有」渲染一帧：
+ * 覆盖率 0%、改写按钮亮着，然后数据到了再跳变 —— 看起来就像页面在抽风。
+ */
+const restoring = ref(true)
+
+onMounted(async () => {
   // 找不到是正常情况，不是异常：显示空态就好，不要抛错让整页白屏
-  if (!analysis.restore(id)) notFound.value = true
+  const ok = await analysis.restore(id)
+  if (!ok) {
+    notFound.value = true
+  } else {
+    // 上次生成过的改写建议从记录里装回来，不再花一次 token
+    hydrateRewrites(analysis.current?.rewrites ?? [])
+  }
+  restoring.value = false
 })
 
 /** 标题里的公司/岗位：优先用分析时存下的快照，没有才退回当前草稿 */
@@ -40,10 +56,24 @@ const meta = computed(() => {
   return { company: store.company, position: store.position }
 })
 
-/** 关键词覆盖率：命中 / (命中 + 缺失)。本地实时算，不依赖 AI，所以不用存 */
-const total = computed(() => store.keywordDiff.matched.length + store.keywordDiff.missing.length)
+/**
+ * 这一页该用哪份原文。
+ *
+ * 优先用记录里的快照，而不是 store 里的草稿：从历史列表点进来时，
+ * 草稿可能早被换成了另一份简历，拿它去算覆盖率、去改写，结果是错的。
+ * 快照是「那次分析当时的输入」，跟这条记录永远对得上。
+ */
+const sourceResume = computed(() => analysis.current?.resumeText || store.resumeText)
+const sourceJob = computed(() => analysis.current?.jobText || store.jobText)
+
+/**
+ * 关键词覆盖率：命中 / (命中 + 缺失)。
+ * 本地实时算，不依赖 AI，所以不用存 —— 只要有原文，随时能重算。
+ */
+const diff = computed(() => diffKeywords(sourceResume.value, sourceJob.value))
+const total = computed(() => diff.value.matched.length + diff.value.missing.length)
 const rate = computed(() =>
-  total.value === 0 ? 0 : Math.round((store.keywordDiff.matched.length / total.value) * 100),
+  total.value === 0 ? 0 : Math.round((diff.value.matched.length / total.value) * 100),
 )
 
 const rateHint = computed(() => {
@@ -55,11 +85,11 @@ const rateHint = computed(() => {
 
 /**
  * 改写要读简历和 JD 原文，所以不能只看「有没有分析结果」。
- * 从别人分享的链接进来时，store 是空的（原文没跟着 URL 走），
- * 这时候点按钮只会请求一个空字符串，白烧一次 token，所以先挡住。
+ * 手上既没有记录快照、草稿又是空的（比如直接打开一个别人转发的 id），
+ * 点按钮只会请求空字符串，白烧一次 token，所以先挡住。
  */
 const canRewrite = computed(
-  () => store.resumeText.trim().length >= 100 && store.jobText.trim().length >= 100,
+  () => sourceResume.value.trim().length >= 100 && sourceJob.value.trim().length >= 100,
 )
 
 /** 一句话说明「现在为什么能点 / 为什么点了没反应」 */
@@ -79,7 +109,13 @@ const rewriteHint = computed(() => {
 async function handleRewrite() {
   if (!canRewrite.value || rewriting.value) return
   // missing 是本地算好的差距，直接喂给模型：省 token，输出也更贴 JD
-  await runRewrite(store.resumeText, store.jobText, store.keywordDiff.missing)
+  await runRewrite(sourceResume.value, sourceJob.value, diff.value.missing)
+
+  // 生成完（含中途停止）把已收到的条目写回记录：
+  // 不写的话，刷新一次就又白花了这 15 秒和这些 token
+  if (rewrites.value.length > 0) {
+    await analysis.patch(id, { rewrites: rewrites.value })
+  }
 }
 </script>
 
@@ -95,93 +131,96 @@ async function handleRewrite() {
       </div>
     </header>
 
-    <!-- AI 分析：有结果就渲染，没有就说清楚为什么没有 -->
-    <section v-if="analysis.current" class="card card-pad">
-      <div class="sec-head">
-        <h2 class="sec-title">AI 深度分析</h2>
-        <span class="text-xs text-3">
-          {{ new Date(analysis.current.createdAt).toLocaleString('zh-CN') }}
-        </span>
-      </div>
-
-      <div class="score-row">
-        <ScoreRing :score="analysis.current.result.score" />
-        <p class="text-sm text-2 summary">{{ analysis.current.result.summary }}</p>
-      </div>
-
-      <div class="divider" />
-
-      <DimensionBars :items="analysis.current.result.dimensions" />
-
-      <div class="divider" />
-
-      <!-- 模型偶尔返回整句而不是技能名，标签会撑成两行，先截 16 字 -->
-      <KeywordTags
-        :matched="analysis.current.result.matched.map((k) => k.slice(0, 16))"
-        :missing="analysis.current.result.missing.map((k) => k.slice(0, 16))"
-      />
+    <!-- 读本地库的那几百毫秒：先给一句话，别让页面先渲染成「什么都没有」再跳变 -->
+    <section v-if="restoring" class="card card-pad">
+      <p class="text-sm text-3">正在读取本地记录…</p>
     </section>
 
-    <section v-else-if="notFound" class="card card-pad empty">
-      <h2 class="sec-title">这个结果不在了</h2>
-      <p class="text-sm text-2">
-        分析结果只存在当前标签页里，刷新还在，关掉标签页或换设备就找不回来。
-      </p>
-      <RouterLink to="/" class="btn go-back">回工作台重新分析</RouterLink>
-    </section>
+    <template v-else>
+      <!-- AI 分析：有结果就渲染，没有就说清楚为什么没有 -->
+      <section v-if="analysis.current" class="card card-pad">
+        <div class="sec-head">
+          <h2 class="sec-title">AI 深度分析</h2>
+          <span class="text-xs text-3">
+            {{ new Date(analysis.current.createdAt).toLocaleString('zh-CN') }}
+          </span>
+        </div>
 
-    <!-- 本地关键词概览：W1 就有的能力，不依赖 AI，刷新照样算得出来 -->
-    <section class="card card-pad">
-      <div class="sec-head">
-        <h2 class="sec-title">关键词覆盖率</h2>
-        <span class="rate">{{ rate }}%</span>
-      </div>
+        <div class="score-row">
+          <ScoreRing :score="analysis.current.result.score" />
+          <p class="text-sm text-2 summary">{{ analysis.current.result.summary }}</p>
+        </div>
 
-      <div class="bar">
-        <div class="bar-fill" :style="{ width: `${rate}%` }" />
-      </div>
-      <p class="text-sm text-2 hint">{{ rateHint }}</p>
+        <div class="divider" />
 
-      <div class="divider" />
+        <DimensionBars :items="analysis.current.result.dimensions" />
 
-      <KeywordTags
-        :matched="store.keywordDiff.matched"
-        :missing="store.keywordDiff.missing"
-        :extra="store.keywordDiff.extra"
-      />
-    </section>
+        <div class="divider" />
 
-    <!-- 改写：放在覆盖率后面，读起来是「先看差多少 → 再看怎么补」 -->
-    <section class="card card-pad">
-      <div class="sec-head">
-        <h2 class="sec-title">简历改写建议</h2>
-        <span v-if="rewrites.length" class="text-xs text-3">{{ rewrites.length }} 条</span>
-      </div>
+        <!-- 模型偶尔返回整句而不是技能名，标签会撑成两行，先截 16 字 -->
+        <KeywordTags
+          :matched="analysis.current.result.matched.map((k) => k.slice(0, 16))"
+          :missing="analysis.current.result.missing.map((k) => k.slice(0, 16))"
+        />
+      </section>
 
-      <p v-if="rewriteHint" class="text-sm text-2 hint">{{ rewriteHint }}</p>
+      <section v-else-if="notFound" class="card card-pad empty">
+        <h2 class="sec-title">这条记录不在了</h2>
+        <p class="text-sm text-2">
+          它只存在你这台电脑的浏览器里。清空过本地数据、换了浏览器或设备，都会读不到。
+        </p>
+        <RouterLink to="/" class="btn go-back">回工作台重新分析</RouterLink>
+      </section>
 
-      <!-- 生成中只留「停止」，生成完就不再显示按钮：按钮消失本身就是「已经做过了」的信号 -->
-      <div v-if="rewriting || !rewrites.length" class="rw-actions">
-        <button v-if="rewriting" class="btn" @click="stopRewrite">停止生成</button>
-        <button v-else class="btn btn-primary" :disabled="!canRewrite" @click="handleRewrite">
-          生成改写建议
-        </button>
-      </div>
+      <!-- 本地关键词概览：W1 就有的能力，不依赖 AI，只要有原文随时能重算 -->
+      <section class="card card-pad">
+        <div class="sec-head">
+          <h2 class="sec-title">关键词覆盖率</h2>
+          <span class="rate">{{ rate }}%</span>
+        </div>
 
-      <RewriteCard :items="rewrites" :loading="rewriting" :error="rewriteError" />
-    </section>
+        <div class="bar">
+          <div class="bar-fill" :style="{ width: `${rate}%` }" />
+        </div>
+        <p class="text-sm text-2 hint">{{ rateHint }}</p>
 
-    <!-- 结果页是「诊断」，下一步是「练」。这里只放一个入口，不把题目塞进本页：
-         出题是另一次请求，塞进来会让结果页一次烧两份额度 -->
-    <section v-if="analysis.current" class="card card-pad next">
-      <div class="next-text">
-        <h2 class="sec-title">接下来练什么</h2>
-        <p class="text-sm text-2">按这份 JD 出 8 道预测题，基础 / 项目 / 场景各一组。</p>
-      </div>
-      <RouterLink :to="`/questions/${analysis.current.id}`" class="btn next-btn">
-        去做面试题 →
-      </RouterLink>
-    </section>
+        <div class="divider" />
+
+        <KeywordTags :matched="diff.matched" :missing="diff.missing" :extra="diff.extra" />
+      </section>
+
+      <!-- 改写：放在覆盖率后面，读起来是「先看差多少 → 再看怎么补」 -->
+      <section class="card card-pad">
+        <div class="sec-head">
+          <h2 class="sec-title">简历改写建议</h2>
+          <span v-if="rewrites.length" class="text-xs text-3">{{ rewrites.length }} 条</span>
+        </div>
+
+        <p v-if="rewriteHint" class="text-sm text-2 hint">{{ rewriteHint }}</p>
+
+        <!-- 生成中只留「停止」，生成完就不再显示按钮：按钮消失本身就是「已经做过了」的信号 -->
+        <div v-if="rewriting || !rewrites.length" class="rw-actions">
+          <button v-if="rewriting" class="btn" @click="stopRewrite">停止生成</button>
+          <button v-else class="btn btn-primary" :disabled="!canRewrite" @click="handleRewrite">
+            生成改写建议
+          </button>
+        </div>
+
+        <RewriteCard :items="rewrites" :loading="rewriting" :error="rewriteError" />
+      </section>
+
+      <!-- 结果页是「诊断」，下一步是「练」。这里只放一个入口，不把题目塞进本页：
+           出题是另一次请求，塞进来会让结果页一次烧两份额度 -->
+      <section v-if="analysis.current" class="card card-pad next">
+        <div class="next-text">
+          <h2 class="sec-title">接下来练什么</h2>
+          <p class="text-sm text-2">按这份 JD 出 8 道预测题，基础 / 项目 / 场景各一组。</p>
+        </div>
+        <RouterLink :to="`/questions/${analysis.current.id}`" class="btn next-btn">
+          去做面试题 →
+        </RouterLink>
+      </section>
+    </template>
   </div>
 </template>
 

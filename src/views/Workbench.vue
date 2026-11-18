@@ -46,8 +46,15 @@ async function handleAnalyze() {
   await run(store.resumeText, store.jobText)
   if (!result.value) return
 
-  // 存完拿到 id，URL 只带这个 id，数据在 store + sessionStorage 里
-  const id = analysis.saveScore(result.value, store.company, store.position)
+  // 存完拿到 id，URL 只带这个 id，数据落在 IndexedDB 里（关掉标签页也还在）。
+  // await 是必须的：IndexedDB 写盘是异步的，不等就跳走的话，
+  // 结果页按 id 去读可能读不到（事务还没结束）
+  const id = await analysis.saveScore(result.value, {
+    company: store.company,
+    position: store.position,
+    resumeText: store.resumeText,
+    jobText: store.jobText,
+  })
   router.push(`/result/${id}`)
 }
 </script>

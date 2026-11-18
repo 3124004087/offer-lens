@@ -176,5 +176,13 @@ export function useQuestions() {
     error.value = null
   }
 
-  return { list, loading, error, masteredCount, run, setMastered, reset }
+  /**
+   * 从本地记录里装回上一次出的题，连自评状态一起。
+   * 刷新 / 从历史列表进来时用，不发请求。
+   */
+  function hydrate(items: Question[]) {
+    list.value = items
+  }
+
+  return { list, loading, error, masteredCount, run, setMastered, reset, hydrate }
 }

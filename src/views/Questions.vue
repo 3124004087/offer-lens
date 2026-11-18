@@ -5,6 +5,7 @@ import QuestionCard from '@/components/common/QuestionCard.vue'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { useAnalysisStore } from '@/stores/analysis'
 import { useQuestions } from '@/composables/useQuestions'
+import { diffKeywords } from '@/composables/useKeywordExtract'
 import type { Question } from '@/types'
 
 const route = useRoute()
@@ -12,15 +13,25 @@ const store = useWorkspaceStore()
 const analysis = useAnalysisStore()
 
 // list / loading / error 都来自 composable，页面不再另存一份
-const { list, loading, error, masteredCount, run, setMastered } = useQuestions()
+const { list, loading, error, masteredCount, run, setMastered, hydrate } = useQuestions()
 
 const id = String(route.params.id)
 
-/** 这个 id 找不回分析结果：别人分享的链接、关标签页后再打开，都会走到这 */
+/** 这个 id 找不回分析结果：记录被清了、链接被转发，都会走到这 */
 const notFound = ref(false)
 
-onMounted(() => {
-  if (!analysis.restore(id)) notFound.value = true
+/** 读本地库是异步的，先占住页面，别让它先渲染成「还没出过题」再跳变 */
+const restoring = ref(true)
+
+onMounted(async () => {
+  const ok = await analysis.restore(id)
+  if (!ok) {
+    notFound.value = true
+  } else {
+    // 上次出过的题连自评一起装回来，刷新不用重新生成（省一笔 token）
+    hydrate(analysis.current?.questions ?? [])
+  }
+  restoring.value = false
 })
 
 /**
@@ -38,9 +49,16 @@ const view = computed(() => {
   return 'idle'
 })
 
-/** 出题要读原文。分享链接进来时 store 是空的，点按钮只会拿空字符串白烧 token */
+/**
+ * 出题要读原文。
+ * 优先用记录里的快照：从历史列表进来时，当前草稿可能已经换成另一份简历了，
+ * 拿它出题，题目跟这条记录对不上。
+ */
+const sourceResume = computed(() => analysis.current?.resumeText || store.resumeText)
+const sourceJob = computed(() => analysis.current?.jobText || store.jobText)
+
 const canGenerate = computed(
-  () => store.resumeText.trim().length >= 100 && store.jobText.trim().length >= 100,
+  () => sourceResume.value.trim().length >= 100 && sourceJob.value.trim().length >= 100,
 )
 
 const idleHint = computed(() => {
@@ -108,7 +126,24 @@ async function handleGenerate() {
   // 换一批时 id 是「下标 + 分类」，很可能和上一批撞上，
   // 不先清空的话，上一批展开的那几道会把新的一批也带成展开状态
   openIds.value = []
-  await run(store.resumeText, store.jobText, store.keywordDiff.missing)
+  // missing 用本地词典现算，不依赖 store 里那份草稿（可能已经是别的简历了）
+  const missing = diffKeywords(sourceResume.value, sourceJob.value).missing
+  await run(sourceResume.value, sourceJob.value, missing)
+
+  // 生成成功才写库：失败时 list 是空的，写进去等于把上一批题抹掉
+  if (list.value.length > 0) {
+    await analysis.patch(id, { questions: list.value })
+  }
+}
+
+/**
+ * 自评：先改界面，再落库。
+ * 落库失败不弹错：自评只是自己看的标记，写不进去顶多刷新后回到「还未标」，
+ * 为这个弹个红字反而更吓人。
+ */
+async function handleMastered(qid: string, value: boolean) {
+  setMastered(qid, value)
+  await analysis.patch(id, { questions: list.value })
 }
 </script>
 
@@ -122,11 +157,16 @@ async function handleGenerate() {
       </div>
     </header>
 
+    <!-- 读本地库的那几百毫秒，先占个位 -->
+    <section v-if="restoring" class="card card-pad">
+      <p class="text-sm text-3">正在读取本地记录…</p>
+    </section>
+
     <!-- 找不到结果 -->
-    <section v-if="view === 'gone'" class="card card-pad empty">
-      <h2 class="sec-title">这个结果不在了</h2>
+    <section v-else-if="view === 'gone'" class="card card-pad empty">
+      <h2 class="sec-title">这条记录不在了</h2>
       <p class="text-sm text-2">
-        分析结果只存在当前标签页里，关掉标签页或换设备就找不回来，出题也就没有原文可读。
+        它只存在你这台电脑的浏览器里。清空过本地数据、换了浏览器或设备，都会读不到，出题也就没有原文可读。
       </p>
       <RouterLink to="/" class="btn go-back">回工作台重新分析</RouterLink>
     </section>
@@ -142,7 +182,7 @@ async function handleGenerate() {
           <div class="bar-fill" :style="{ width: `${pct}%` }" />
         </div>
         <p class="text-sm text-2 hint">
-          会 / 不会只是给自己做标记，不影响评分。切 Tab 不会丢，刷新会（存库是下一步的事）。
+          会 / 不会只是给自己做标记，不影响评分。切 Tab、刷新、关掉浏览器都不会丢。
         </p>
       </section>
 
@@ -192,7 +232,7 @@ async function handleGenerate() {
               :item="q"
               :open="openIds.includes(q.id)"
               @toggle="toggleOpen"
-              @mastered="setMastered"
+              @mastered="handleMastered"
             />
             <!-- 某一类可能一道都没有：模型偶尔 2 道场景题都写成了 basic -->
             <p v-if="shown.length === 0" class="text-sm text-3">这一类这次没出题，切别的 Tab 看看。</p>
