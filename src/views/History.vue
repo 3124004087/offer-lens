@@ -5,6 +5,7 @@
 import { onMounted, ref } from 'vue'
 import { RouterLink } from 'vue-router'
 import { useAnalysisStore } from '@/stores/analysis'
+import StateBlock from '@/components/common/StateBlock.vue'
 import type { SavedAnalysis } from '@/types'
 
 const analysis = useAnalysisStore()
@@ -99,25 +100,27 @@ async function handleDelete(item: SavedAnalysis) {
       </p>
     </header>
 
-    <section v-if="status === 'loading'" class="card card-pad">
-      <p class="text-sm text-3">正在读取本地记录…</p>
-    </section>
+    <!-- 三种态交给 StateBlock 画，这里只负责判断该用哪一种 -->
+    <StateBlock v-if="status === 'loading'" variant="loading" />
 
-    <section v-else-if="status === 'error'" class="card card-pad empty">
-      <p class="empty-title">读不出来</p>
-      <p class="text-sm text-2">{{ errorMsg }}</p>
-      <p class="text-xs text-3">
-        浏览器隐私模式可能禁用了本地数据库，换一个普通窗口再试。
-      </p>
-    </section>
+    <StateBlock
+      v-else-if="status === 'error'"
+      variant="error"
+      title="读不出来"
+      :desc="errorMsg"
+      hint="浏览器隐私模式可能禁用了本地数据库，换一个普通窗口再试。"
+    />
 
-    <section v-else-if="list.length === 0" class="card card-pad empty">
-      <p class="empty-title">还没有分析记录</p>
-      <p class="text-sm text-2">
-        去工作台粘一份简历和 JD，点「开始分析」，这里就会出现第一条。
-      </p>
-      <RouterLink to="/" class="btn btn-primary go">去工作台试试</RouterLink>
-    </section>
+    <StateBlock
+      v-else-if="list.length === 0"
+      variant="empty"
+      title="还没有分析记录"
+      desc="去工作台粘一份简历和 JD，点「开始分析」，这里就会出现第一条。"
+    >
+      <template #actions>
+        <RouterLink to="/" class="btn btn-primary go">去工作台试试</RouterLink>
+      </template>
+    </StateBlock>
 
     <template v-else>
       <p class="text-xs text-3 list-head">共 {{ list.length }} 条 · 按时间从新到旧</p>
@@ -180,19 +183,6 @@ async function handleDelete(item: SavedAnalysis) {
   font-size: 22px;
   font-weight: 600;
   letter-spacing: -0.02em;
-}
-
-.empty {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  align-items: flex-start;
-  padding: 36px 18px;
-}
-
-.empty-title {
-  font-size: 15px;
-  font-weight: 600;
 }
 
 .go {

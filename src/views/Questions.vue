@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
 import QuestionCard from '@/components/common/QuestionCard.vue'
+import StateBlock from '@/components/common/StateBlock.vue'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { useAnalysisStore } from '@/stores/analysis'
 import { useQuestions } from '@/composables/useQuestions'
@@ -158,18 +159,19 @@ async function handleMastered(qid: string, value: boolean) {
     </header>
 
     <!-- 读本地库的那几百毫秒，先占个位 -->
-    <section v-if="restoring" class="card card-pad">
-      <p class="text-sm text-3">正在读取本地记录…</p>
-    </section>
+    <StateBlock v-if="restoring" variant="loading" />
 
     <!-- 找不到结果 -->
-    <section v-else-if="view === 'gone'" class="card card-pad empty">
-      <h2 class="sec-title">这条记录不在了</h2>
-      <p class="text-sm text-2">
-        它只存在你这台电脑的浏览器里。清空过本地数据、换了浏览器或设备，都会读不到，出题也就没有原文可读。
-      </p>
-      <RouterLink to="/" class="btn go-back">回工作台重新分析</RouterLink>
-    </section>
+    <StateBlock
+      v-else-if="view === 'gone'"
+      variant="empty"
+      title="这条记录不在了"
+      desc="它只存在你这台电脑的浏览器里。清空过本地数据、换了浏览器或设备，都会读不到，出题也就没有原文可读。"
+    >
+      <template #actions>
+        <RouterLink to="/" class="btn go-back">回工作台重新分析</RouterLink>
+      </template>
+    </StateBlock>
 
     <template v-else>
       <!-- 掌握进度：只在有题时出现，没题时显示 0/0 是噪音 -->
@@ -360,13 +362,6 @@ async function handleMastered(qid: string, value: boolean) {
   display: flex;
   flex-direction: column;
   gap: 8px;
-}
-
-.empty {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 10px;
 }
 
 .go-back {
