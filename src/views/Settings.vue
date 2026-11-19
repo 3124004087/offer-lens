@@ -11,22 +11,30 @@ const cleared = ref(false)
 const count = ref(0) // 有几条历史记录
 const usage = ref('—') // 占了多少空间，先给占位符，取不到就显示它
 
-// 字节转成人能读的单位。必须先判大小：一条记录才几十 KB，
-// 直接除以两次 1024 再 toFixed(1)，会显示成「0.0 MB」，等于没说
+// 字节转成人能读的单位。
+//
+// 为什么不显示到 KB：estimate() 的 usage 按规范是「取整并填充」过的
+// （rounded and padded，防止网站反推磁盘容量），删掉几十 KB 的数据后它可能不降反升；
+// 加上浏览器内部压缩是异步的，空间不会立刻收回。
+// 这个项目一条记录才十几 KB，数字的噪声比信号大，所以只给粗档
 function formatBytes(bytes: number) {
-  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(0) + ' KB'
+  if (bytes < 1024 * 1024) return '不到 1 MB'
   return (bytes / 1024 / 1024).toFixed(1) + ' MB'
 }
 
-// 读记录是异步的，不能在 setup 顶层同步拿，所以放 onMounted
-onMounted(async () => {
+// 条数和占用一起刷。进入页面要调，清空之后也要调 ——
+// 只改 count 不重读 estimate，页面上的空间数就会停在旧值，看着像没清干净
+async function refreshStats() {
   count.value = (await listAnalyses()).length
 
   // estimate() 返回 { usage, quota }，单位是字节。
   // 加 ?. 是因为老浏览器、隐私模式可能根本没有这个方法
   const info = await navigator.storage?.estimate?.()
   if (info?.usage != null) usage.value = formatBytes(info.usage)
-})
+}
+
+// 读记录是异步的，不能在 setup 顶层同步拿，所以放 onMounted
+onMounted(refreshStats)
 
 // 两段式确认：第一下只是「上膛」，3 秒内再点一下才真删。
 // 不用 window.confirm —— 它会卡住整个页面线程，样式也不受控制
@@ -57,7 +65,11 @@ async function handleClear() {
   }
 
   store.reset() // 草稿跟着一起清
-  count.value = 0 // 不写这句，就会出现「库空了、页面还写着 5 条」
+
+  // 从库里重新读一次，而不是直接把 count 写成 0 ——
+  // 读完才知道「确实清空了」，顺手把占用空间也刷一遍
+  await refreshStats()
+
   cleared.value = true
   tipTimer = setTimeout(() => (cleared.value = false), 2500)
 }
@@ -84,7 +96,7 @@ onUnmounted(() => {
       <!-- 说「本站点」而不是「历史记录」：usage 是整个 origin 的总用量，
            还包含 localStorage 里的草稿和浏览器缓存，不只是 IndexedDB -->
       <p class="text-xs text-3 stat">
-        当前本机有 {{ count }} 条分析记录，本站点已用空间约 {{ usage }}
+        当前本机有 {{ count }} 条分析记录，本站点占用 {{ usage }}
       </p>
     </section>
 
