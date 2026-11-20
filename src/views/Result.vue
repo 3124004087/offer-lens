@@ -5,6 +5,7 @@ import KeywordTags from '@/components/common/KeywordTags.vue'
 import ScoreRing from '@/components/common/ScoreRing.vue'
 import DimensionBars from '@/components/common/DimensionBars.vue'
 import RewriteCard from '@/components/common/RewriteCard.vue'
+import StateBlock from '@/components/common/StateBlock.vue'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { useAnalysisStore } from '@/stores/analysis'
 import { useRewrite } from '@/composables/useRewrite'
@@ -131,10 +132,8 @@ async function handleRewrite() {
       </div>
     </header>
 
-    <!-- 读本地库的那几百毫秒：先给一句话，别让页面先渲染成「什么都没有」再跳变 -->
-    <section v-if="restoring" class="card card-pad">
-      <p class="text-sm text-3">正在读取本地记录…</p>
-    </section>
+    <!-- 读本地库的那几百毫秒：给骨架条，别让页面先渲染成「什么都没有」再跳变 -->
+    <StateBlock v-if="restoring" variant="loading" title="正在读取本地记录" />
 
     <template v-else>
       <!-- AI 分析：有结果就渲染，没有就说清楚为什么没有 -->
@@ -164,62 +163,73 @@ async function handleRewrite() {
         />
       </section>
 
-      <section v-else-if="notFound" class="card card-pad empty">
-        <h2 class="sec-title">这条记录不在了</h2>
-        <p class="text-sm text-2">
-          它只存在你这台电脑的浏览器里。清空过本地数据、换了浏览器或设备，都会读不到。
-        </p>
-        <RouterLink to="/" class="btn go-back">回工作台重新分析</RouterLink>
-      </section>
+      <!-- 记录不在了：整页只留这一块。
+           下面「覆盖率 / 改写」都靠 sourceResume 取原文，找不到记录时会退回当前草稿，
+           拿别人的简历去算出 0% 或别的百分比，是错的 —— 宁可不显示 -->
+      <StateBlock
+        v-else-if="notFound"
+        variant="empty"
+        title="这条记录不在了"
+        desc="它只存在你这台电脑的浏览器里。清空过本地数据、换了浏览器或设备，都会读不到。"
+      >
+        <template #actions>
+          <RouterLink to="/" class="btn go-back">回工作台重新分析</RouterLink>
+        </template>
+      </StateBlock>
 
-      <!-- 本地关键词概览：W1 就有的能力，不依赖 AI，只要有原文随时能重算 -->
-      <section class="card card-pad">
-        <div class="sec-head">
-          <h2 class="sec-title">关键词覆盖率</h2>
-          <span class="rate">{{ rate }}%</span>
-        </div>
+      <!-- 这里用独立的 v-if，不接着上面的 v-else-if 往后串：
+           上面那条链是「AI 分析 / 空态」二选一，而覆盖率和改写是「有数据就该有」，
+           串成一条链的话，有分析结果时反而会把这两块一起跳过 -->
+      <template v-if="!notFound">
+        <!-- 本地关键词概览：W1 就有的能力，不依赖 AI，只要有原文随时能重算 -->
+        <section class="card card-pad">
+          <div class="sec-head">
+            <h2 class="sec-title">关键词覆盖率</h2>
+            <span class="rate">{{ rate }}%</span>
+          </div>
 
-        <div class="bar">
-          <div class="bar-fill" :style="{ width: `${rate}%` }" />
-        </div>
-        <p class="text-sm text-2 hint">{{ rateHint }}</p>
+          <div class="bar">
+            <div class="bar-fill" :style="{ width: `${rate}%` }" />
+          </div>
+          <p class="text-sm text-2 hint">{{ rateHint }}</p>
 
-        <div class="divider" />
+          <div class="divider" />
 
-        <KeywordTags :matched="diff.matched" :missing="diff.missing" :extra="diff.extra" />
-      </section>
+          <KeywordTags :matched="diff.matched" :missing="diff.missing" :extra="diff.extra" />
+        </section>
 
-      <!-- 改写：放在覆盖率后面，读起来是「先看差多少 → 再看怎么补」 -->
-      <section class="card card-pad">
-        <div class="sec-head">
-          <h2 class="sec-title">简历改写建议</h2>
-          <span v-if="rewrites.length" class="text-xs text-3">{{ rewrites.length }} 条</span>
-        </div>
+        <!-- 改写：放在覆盖率后面，读起来是「先看差多少 → 再看怎么补」 -->
+        <section class="card card-pad">
+          <div class="sec-head">
+            <h2 class="sec-title">简历改写建议</h2>
+            <span v-if="rewrites.length" class="text-xs text-3">{{ rewrites.length }} 条</span>
+          </div>
 
-        <p v-if="rewriteHint" class="text-sm text-2 hint">{{ rewriteHint }}</p>
+          <p v-if="rewriteHint" class="text-sm text-2 hint">{{ rewriteHint }}</p>
 
-        <!-- 生成中只留「停止」，生成完就不再显示按钮：按钮消失本身就是「已经做过了」的信号 -->
-        <div v-if="rewriting || !rewrites.length" class="rw-actions">
-          <button v-if="rewriting" class="btn" @click="stopRewrite">停止生成</button>
-          <button v-else class="btn btn-primary" :disabled="!canRewrite" @click="handleRewrite">
-            生成改写建议
-          </button>
-        </div>
+          <!-- 生成中只留「停止」，生成完就不再显示按钮：按钮消失本身就是「已经做过了」的信号 -->
+          <div v-if="rewriting || !rewrites.length" class="rw-actions">
+            <button v-if="rewriting" class="btn" @click="stopRewrite">停止生成</button>
+            <button v-else class="btn btn-primary" :disabled="!canRewrite" @click="handleRewrite">
+              生成改写建议
+            </button>
+          </div>
 
-        <RewriteCard :items="rewrites" :loading="rewriting" :error="rewriteError" />
-      </section>
+          <RewriteCard :items="rewrites" :loading="rewriting" :error="rewriteError" />
+        </section>
 
-      <!-- 结果页是「诊断」，下一步是「练」。这里只放一个入口，不把题目塞进本页：
-           出题是另一次请求，塞进来会让结果页一次烧两份额度 -->
-      <section v-if="analysis.current" class="card card-pad next">
-        <div class="next-text">
-          <h2 class="sec-title">接下来练什么</h2>
-          <p class="text-sm text-2">按这份 JD 出 8 道预测题，基础 / 项目 / 场景各一组。</p>
-        </div>
-        <RouterLink :to="`/questions/${analysis.current.id}`" class="btn next-btn">
-          去做面试题 →
-        </RouterLink>
-      </section>
+        <!-- 结果页是「诊断」，下一步是「练」。这里只放一个入口，不把题目塞进本页：
+             出题是另一次请求，塞进来会让结果页一次烧两份额度 -->
+        <section v-if="analysis.current" class="card card-pad next">
+          <div class="next-text">
+            <h2 class="sec-title">接下来练什么</h2>
+            <p class="text-sm text-2">按这份 JD 出 8 道预测题，基础 / 项目 / 场景各一组。</p>
+          </div>
+          <RouterLink :to="`/questions/${analysis.current.id}`" class="btn next-btn">
+            去做面试题 →
+          </RouterLink>
+        </section>
+      </template>
     </template>
   </div>
 </template>
@@ -302,13 +312,7 @@ async function handleRewrite() {
   line-height: 1.6;
 }
 
-.empty {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 10px;
-}
-
+/* 空态的排版交给 StateBlock，这里只留插槽里那个链接的样式 */
 .go-back {
   min-height: 36px;
   padding: 0 14px;
