@@ -83,25 +83,33 @@ while (true) {
 
 ### 2. 用 rAF 合并高频更新
 
-流式输出时每秒 30-60 个 token，直接 `text.value += delta` 会造成大量重渲染。用 `requestAnimationFrame` 把一帧内的多次追加合并成一次：
+流式输出时 token 是一小片一小片到的，每来一片就重算一次列表、换一次数组引用，等于同一个 16ms 里算了好几遍，浏览器只会把最后一遍画出来。
+
+现在用 `requestAnimationFrame` 把一帧内的多次触发合并成一次（`composables/useRAFBuffer.ts`）：
 
 ```ts
-function push(chunk: string) {
-  pending += chunk
-  if (!rafId) rafId = requestAnimationFrame(() => {
-    value.value += pending
-    pending = ''
-    rafId = 0
+function schedule() {
+  if (rafId) return                 // 这一帧已经排上了，再调也没用
+  rafId = requestAnimationFrame(() => {
+    rafId = 0                       // 先清零再执行，否则 flush 内部的再次 schedule 会被吞掉
+    flush()
   })
 }
 ```
 
-**效果**（Chrome Performance 录制 10 秒流式过程）：
+**收尾必须自己补一次**：流结束时最后一帧可能还没到，要在 `finally` 里 `cancel()` 之后同步 `flush()` 一次，否则最后 1–2 条结果会丢。
 
-| 指标 | 优化前 | 优化后 |
+**实测结论**（Chrome longtask API，本地开发环境，同一份简历 + JD）：
+
+| 指标 | 接入前 | 接入后 |
 |---|---|---|
-| 主线程 > 16ms 长任务 | 50+ 个 | 个位数 |
-| 滚动帧率 | 约 30fps | 稳定 60fps |
+| 主线程 > 50ms 长任务 | 0 个 | 0 个 |
+| 单次流式耗时（模型生成，仅参考） | 29.3s | 12.0s |
+
+长任务两边都是 0，说明**这个数据量下渲染本来就不是瓶颈**，所以这次改动测不出收益。它的价值在别处：token 速率更高时兜底，以及保证同一帧不会重复渲染。
+
+耗时那一行是模型输出长度与网络波动造成的，**不属于优化效果**，写在这里只是为了说明为什么不能拿它当指标。
+
 
 ### 3. 「本地词典 + AI」双路关键词抽取
 
@@ -169,19 +177,27 @@ npm run dev
 
 ```
 offer-lens/
-├─ api/chat.ts                # 唯一后端：AI 流式代理
+├─ api/chat.ts                # 唯一后端：AI 流式代理（Key 只在服务端）
 ├─ src/
-│  ├─ composables/
+│  ├─ composables/            # 一个能力一个文件
 │  │  ├─ useAIStream.ts       # SSE 流式请求 + 解析 + 中止
 │  │  ├─ useRAFBuffer.ts      # 高频更新按帧合并
-│  │  ├─ useKeywordExtract.ts # 本地词典抽取
-│  │  ├─ useJsonParse.ts      # AI JSON 容错解析
+│  │  ├─ useKeywordExtract.ts # 本地词典抽取（不花 token）
+│  │  ├─ useScore.ts          # 匹配度评分（非流式）
+│  │  ├─ useRewrite.ts        # 逐段改写建议（流式）
+│  │  ├─ useQuestions.ts      # 面试题预测（非流式）
 │  │  └─ useLocalDB.ts        # IndexedDB 封装
-│  ├─ prompts/                # prompt 独立管理，便于迭代
-│  ├─ stores/workspace.ts     # 只放跨路由共享状态
+│  ├─ utils/
+│  │  ├─ extractObjects.ts    # 从半包流里捞出完整 JSON 对象
+│  │  └─ safeParseJSON.ts     # AI 返回 JSON 的容错解析
+│  ├─ prompts/                # prompt 单独管理，便于迭代
+│  ├─ stores/                 # 只放跨路由共享的状态
+│  ├─ styles/                 # 设计令牌 + 全局样式
 │  ├─ components/
-│  └─ views/
-└─ docs/                      # 需求文档 / 技术方案 / 排期
+│  │  ├─ common/              # 复用组件（评分环 / 维度条 / 状态块等）
+│  │  └─ layout/              # 页面框架
+│  └─ views/                  # 5 个页面，全部路由懒加载
+└─ docs/                      # 需求 / 技术方案 / 排期 / 进度台账 / 踩坑复盘
 ```
 
 ## 部署

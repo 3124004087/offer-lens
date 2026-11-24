@@ -5,6 +5,7 @@
 // 这不是「谁更高级」，是按数据量级选的。面试被问「为什么这快流式那块不流式」就这么答。
 import { ref } from 'vue'
 import { useAIStream } from './useAIStream'
+import { useRAFBuffer } from './useRAFBuffer'
 import { REWRITE_SYSTEM, buildRewriteUser } from '@/prompts/rewrite'
 import { extractObjects } from '@/utils/extractObjects'
 import type { RewriteItem } from '@/types'
@@ -44,6 +45,19 @@ export function useRewrite() {
 
   const stream = useAIStream()
 
+  // 累积已到的原文。放普通变量而不是 ref：模板不渲染它，不需要响应式
+  let buffer = ''
+
+  // 一帧只做一次：全量重扫 + 换数组引用。
+  // 之前是每来一片就跑这里一次，一帧里算好几遍只有最后一遍会被画出来。
+  function flushList() {
+    list.value = extractObjects(buffer)
+      .map(toItem)
+      .filter((x): x is RewriteItem => x !== null)
+  }
+
+  const { schedule, cancel } = useRAFBuffer(flushList)
+
   /**
    * 入参里的 missing 来自 useKeywordExtract 的本地比对结果，
    * 直接喂给模型当「已知差距」——省 token，输出还更稳。
@@ -56,24 +70,16 @@ export function useRewrite() {
     loading.value = true
     error.value = null
     list.value = []
-
-    // 累积已到的原文。放普通变量而不是 ref：
-    // 模板不渲染它，不需要响应式（ref 有开销也有坑）
-    let buffer = ''
+    buffer = ''
 
     try {
       await stream.run(
         { system: REWRITE_SYSTEM, user: buildRewriteUser(resume, job, missing), json: true },
         {
-          // 核心三步：累加 → 全量重扫 → 换整个数组引用。
-          // 看着像 O(n²)（每来一片重扫全部），但总长一两千字，实测无感。
-          // 每次换引用会让 Vue 全量重渲染这张列表，也先接受——
-          // W4D1 用 rAF 收敛渲染频率。先让它对，再谈快
+          // 只攒不画：整页渲染交给 requestAnimationFrame，一帧最多一次
           onDelta: (chunk) => {
             buffer += chunk
-            list.value = extractObjects(buffer)
-              .map(toItem)
-              .filter((x): x is RewriteItem => x !== null)
+            schedule()
           },
           onError: (msg) => {
             error.value = msg
@@ -81,6 +87,10 @@ export function useRewrite() {
         },
       )
     } finally {
+      // 最后一帧可能还没到、流就结束了。不补这一次，最后 1-2 片直接丢。
+      // 和 11-06 那个「循环 break 后残行被扔」是同一类错：收尾必须自己 flush 一次
+      cancel()
+      flushList()
       // 出错时故意不清空 list：已经收到的条目是真的，留着给用户看；
       // 错误信息单独显示，重试时会整体重开（run 开头的 list.value = []）
       loading.value = false
