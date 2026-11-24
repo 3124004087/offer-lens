@@ -1,7 +1,8 @@
 <script setup lang="ts">
-// 改写建议的「展示层」，只干一件事：把 items 画成左右对比。
-// 不请求数据、不放按钮 —— 请求在 useRewrite，触发在 Result.vue。
+// 改写建议的「展示层」：把 items 画成左右对比，每条带一个「复制」按钮。
+// 不请求数据 —— 请求在 useRewrite，触发在 Result.vue。
 // 这样以后历史记录页（W3D3）想展示旧的改写，直接传 items 进来就能用。
+import { ref } from 'vue'
 import type { RewriteItem } from '@/types'
 
 withDefaults(
@@ -20,6 +21,29 @@ const TYPE_LABEL: Record<RewriteItem['type'], string> = {
   weak: '表达偏弱',
   missing: '缺关键词',
   good: '本来就挺好',
+}
+
+// 点完要让用户知道「成了」。只记 id 而不是布尔值：
+// 六张卡片共用一个状态的话，点一条会让六条一起变「已复制」
+const copiedId = ref('')
+let timer: number | undefined
+
+/**
+ * @param text 要复制的文字
+ * @param id   哪一条，只用来做「已复制」的视觉反馈，不参与复制本身
+ */
+async function copy(text: string, id: string) {
+  try {
+    await navigator.clipboard.writeText(text)
+    copiedId.value = id
+    // 连点两次要把上一次的计时清掉，否则第一次的 1.5 秒会提前把第二次的提示收走
+    window.clearTimeout(timer)
+    timer = window.setTimeout(() => {
+      copiedId.value = ''
+    }, 1500)
+  } catch (err) {
+    console.error(err)
+  }
 }
 </script>
 
@@ -56,7 +80,18 @@ const TYPE_LABEL: Record<RewriteItem['type'], string> = {
       </div>
 
       <div class="rw-side">
-        <span class="rw-tag">改写</span>
+        <!-- 标签和按钮排成一行，按钮推到最右：不改的话标签长度一变，按钮就跟着抖 -->
+        <div class="rw-copy-row">
+          <span class="rw-tag">改写</span>
+          <button
+            type="button"
+            class="rw-copy"
+            :class="{ 'is-copied': copiedId === item.id }"
+            @click="copy(item.suggestion, item.id)"
+          >
+            {{ copiedId === item.id ? '已复制' : '复制' }}
+          </button>
+        </div>
         <p class="rw-text rw-suggest">{{ item.suggestion }}</p>
         <p v-if="item.reason" class="rw-reason">{{ item.reason }}</p>
       </div>
@@ -133,6 +168,43 @@ const TYPE_LABEL: Record<RewriteItem['type'], string> = {
 .rw-tag {
   font-size: 12px;
   color: var(--c-text-3);
+}
+
+/* 标签在左、按钮在右。用 space-between 而不是给按钮加 margin-left：
+   标签换行或变长时，按钮位置不受影响 */
+.rw-copy-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 22px;
+}
+
+/* 次要按钮：透明底 + 细边框。不用主色实心，
+   因为它是「顺手拿走一句」的辅助动作，抢了眼睛就看不清正文了 */
+.rw-copy {
+  padding: 1px 9px;
+  border: 1px solid var(--c-border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--c-text-2);
+  font-size: 12px;
+  line-height: 18px;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+
+.rw-copy:hover {
+  color: var(--c-text);
+  border-color: var(--c-text-3);
+}
+
+/* 复制成功：临时变绿 1.5 秒，时间由 ts 里的 setTimeout 控制 */
+.rw-copy.is-copied {
+  border-color: var(--c-success);
+  background: var(--c-success-weak);
+  color: var(--c-success);
+  cursor: default;
 }
 
 .rw-text {
