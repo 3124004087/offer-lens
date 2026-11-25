@@ -11,8 +11,15 @@
 >
 > 无需注册，打开即用。AI 功能需要服务端配置 API Key（见[部署](#部署)）。
 
-<!-- 放 3 张图：工作台 / 结果页 / 面试题页 -->
-![工作台](./screenshots/workbench.png)
+<p align="center">
+  <img src="./screenshots/workbench.png" width="49%" alt="工作台：左简历右 JD，关键词差异本地实时算">
+  <img src="./screenshots/result.png" width="49%" alt="分析结果：匹配度 82 分 + 三个维度 + 逐段改写">
+</p>
+<p align="center"><sub>左：输入 —— 关键词差异纯前端算，不耗 token　｜　右：输出 —— 总分 + 维度 + 覆盖率</sub></p>
+
+<p align="center">
+  <img src="./screenshots/questions.png" width="72%" alt="面试题预测：按 JD 出 8 道题，分基础/项目/场景三组">
+</p>
 
 ---
 
@@ -202,11 +209,28 @@ offer-lens/
 
 ## 部署
 
+项目是「静态前端 + 一个 Edge Function」，部署到 Vercel 只需要两步，**顺序不能反**：
+
 ```bash
-vercel --prod
+# 1. 先把 Key 配上（本地 .env 不会被上传，线上读不到就是 500）
+npx vercel env add DEEPSEEK_API_KEY production
+
+# 2. 再部署
+npx vercel --prod
 ```
 
-然后在 Vercel 项目设置 → Environment Variables 添加 `DEEPSEEK_API_KEY`。
+`.env` 已在 `.gitignore` 里，只在本地 `npm run dev` 时被读取；线上读的是 Vercel 项目的环境变量。
+**Key 不能加 `VITE_` 前缀** —— 加了会被 Vite 打进前端产物，F12 就能看到。
+
+### 常见问题
+
+| 现象 | 原因 |
+|---|---|
+| 页面能打开，点分析报 500 | 线上没配 `DEEPSEEK_API_KEY`，或变量名拼错 |
+| 报 401 | Key 失效或额度用完（DeepSeek 控制台可查） |
+| 刷新 `/result/xxx` 404 | `vercel.json` 的 rewrite 被删了，SPA 需要把非静态路径回落到 `index.html` |
+
+> 本地开发不需要 Vercel CLI：`npm run dev` 时 `vite.config.ts` 里挂了一个中间件，直接复用 `api/chat.ts` 的 handler，逻辑只有一份。
 
 > 本项目按「文档先行」开发，`docs/` 里保留了完整的需求文档、技术选型说明和 4 周排期，可以直接看出每个决策的来龙去脉。
 
