@@ -7,9 +7,9 @@
 [![Vite](https://img.shields.io/badge/Vite-5.x-646cff?logo=vite)](https://vitejs.dev/)
 [![License](https://img.shields.io/badge/license-MIT-green)](#license)
 
-> 🔗 在线体验：**[offer-lens.vercel.app](#)** ← 替换成你的部署地址
+> 🔗 在线体验：**[offer-lens-lemon.vercel.app](https://offer-lens-lemon.vercel.app)**
 >
-> 无需注册，打开即用。AI 功能需要服务端配置 API Key（见[部署](#部署)）。
+> 无需注册，打开即用。AI 功能走服务端代理，Key 不在前端（见[部署](#部署)）。
 
 <p align="center">
   <img src="./screenshots/workbench.png" width="49%" alt="工作台：左简历右 JD，关键词差异本地实时算">
@@ -209,7 +209,11 @@ offer-lens/
 
 ## 部署
 
-项目是「静态前端 + 一个 Edge Function」，部署到 Vercel 只需要两步，**顺序不能反**：
+线上地址：**https://offer-lens-lemon.vercel.app**
+
+架构是「静态前端 + 一个 Edge Function」：`npm run build` 出 `dist/`，`api/chat.ts` 单独跑在 Edge Runtime 上，共用 `vercel.json` 里的 SPA 回落规则。
+
+项目已接 GitHub（`main` 分支），**push 即自动部署**，不需要本地装 Vercel CLI。首次手动部署或换环境时，顺序不能反：
 
 ```bash
 # 1. 先把 Key 配上（本地 .env 不会被上传，线上读不到就是 500）
@@ -226,9 +230,10 @@ npx vercel --prod
 
 | 现象 | 原因 |
 |---|---|
-| 页面能打开，点分析报 500 | 线上没配 `DEEPSEEK_API_KEY`，或变量名拼错 |
+| 页面能打开，点分析报 500 + `missing_api_key` | 线上没配 `DEEPSEEK_API_KEY`，或配完没重新部署 |
 | 报 401 | Key 失效或额度用完（DeepSeek 控制台可查） |
 | 刷新 `/result/xxx` 404 | `vercel.json` 的 rewrite 被删了，SPA 需要把非静态路径回落到 `index.html` |
+| 本地 `vercel dev` 卡在 `Retrieving project…` | 所在网络访问不到 `api.vercel.com`（校园网常见），与代码无关 |
 
 > 本地开发不需要 Vercel CLI：`npm run dev` 时 `vite.config.ts` 里挂了一个中间件，直接复用 `api/chat.ts` 的 handler，逻辑只有一份。
 
