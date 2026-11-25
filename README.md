@@ -10,6 +10,9 @@
 > 🔗 在线体验：**[offer-lens-lemon.vercel.app](https://offer-lens-lemon.vercel.app)**
 > （部署在 Vercel 海外节点；本地 `npm run dev` 体验最完整，见[快速开始](#快速开始)）
 >
+> 🎯 定位：**前端方向**的实习岗位。词库（27 个前端技术词）与三套 prompt 都按前端 JD 整理；
+> 换成后端 / 产品岗也能出分，但关键词覆盖率会归零、建议会失真 —— 这是刻意的取舍，不追求通用。
+>
 > 无需注册，打开即用。AI 功能走服务端代理，Key 不在前端（见[部署](#部署)）。
 
 <p align="center">

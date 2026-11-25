@@ -78,7 +78,8 @@ const rate = computed(() =>
 )
 
 const rateHint = computed(() => {
-  if (total.value === 0) return '没有识别到技能关键词，JD 可能写得太抽象'
+  if (total.value === 0)
+    return 'JD 里没出现词库中的技术词：可能写得太抽象，也可能岗位不在词库范围内（目前只覆盖前端）'
   if (rate.value >= 80) return '技能栈覆盖得不错，重点补项目深度'
   if (rate.value >= 50) return '基本功够了，缺的这几项面试大概率会问'
   return '差距明显，建议先补齐缺失项再投'
