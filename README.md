@@ -8,6 +8,7 @@
 [![License](https://img.shields.io/badge/license-MIT-green)](#license)
 
 > 🔗 在线体验：**[offer-lens-lemon.vercel.app](https://offer-lens-lemon.vercel.app)**
+> （部署在 Vercel 海外节点；本地 `npm run dev` 体验最完整，见[快速开始](#快速开始)）
 >
 > 无需注册，打开即用。AI 功能走服务端代理，Key 不在前端（见[部署](#部署)）。
 
@@ -185,7 +186,6 @@ npm run dev
 ```
 offer-lens/
 ├─ api/chat.ts                # 唯一后端：AI 流式代理（Key 只在服务端）· Vercel 版
-├─ edge-functions/api/chat.js # 同一份逻辑的 EdgeOne 版入口（国内部署用）
 ├─ src/
 │  ├─ composables/            # 一个能力一个文件
 │  │  ├─ useAIStream.ts       # SSE 流式请求 + 解析 + 中止
@@ -210,18 +210,7 @@ offer-lens/
 
 ## 部署
 
-项目同时部署在两个平台：**同一份前端产物、同一套接口协议，只有函数入口不同**。
-
-| 平台 | 地址 | 函数入口 | 适用 |
-|---|---|---|---|
-| Vercel | https://offer-lens-lemon.vercel.app | `api/chat.ts` | 海外节点 |
-| EdgeOne Pages（腾讯云） | 待填 | `edge-functions/api/chat.js` | 国内节点 |
-
-**为什么要两个入口**：Vercel 的签名是 `export default handler(Request)`，Key 从 `process.env` 读；
-EdgeOne 的签名是 `onRequest(context)`，Key 从 `context.env` 读，且运行时是 V8（没有 Node 内置模块、没有 `Response.json()`）。
-转发逻辑（请求体协议、错误码、SSE 透传）完全一致，前端永远只请求 `/api/chat`，换平台不用改一行前端代码。
-
-### Vercel
+线上地址：**https://offer-lens-lemon.vercel.app**
 
 架构是「静态前端 + 一个 Edge Function」：`npm run build` 出 `dist/`，`api/chat.ts` 单独跑在 Edge Runtime 上，共用 `vercel.json` 里的 SPA 回落规则。
 
@@ -238,16 +227,14 @@ npx vercel --prod
 `.env` 已在 `.gitignore` 里，只在本地 `npm run dev` 时被读取；线上读的是 Vercel 项目的环境变量。
 **Key 不能加 `VITE_` 前缀** —— 加了会被 Vite 打进前端产物，F12 就能看到。
 
-### EdgeOne Pages
+### 国内访问
 
-控制台导入同一个 GitHub 仓库即可，构建配置：
+`*.vercel.app` 在国内被整段丢弃（实测 TCP 443 直接超时，DNS 解析正常），不是配置问题。
 
-- 构建命令 `npm run build`，输出目录 `dist`
-- 环境变量 `DEEPSEEK_API_KEY`（同样不能加 `VITE_` 前缀）
-- SPA 回落写在根目录 `edgeone.json`：`{"rewrites":[{"source":"/*","destination":"/index.html"}]}`
-  （静态资源与 `edge-functions/` 命中优先，未命中才回 `index.html`）
+也试过腾讯云 EdgeOne Pages：免费版的默认域名在大陆只能用 3 小时有效期的预览链接，
+想长期可访问必须绑自有域名 + ICP 备案（1–3 周），时间上不划算，所以没有切换。
 
-> 部署到国内节点，是为了让没有代理的访客也能打开。这一步和代码无关，纯粹是网络可达性问题。
+> 这段排查过程（怎么区分「网络不通」和「部署失败」）记在 [`docs/08`](./docs/08-踩坑复盘与面试话术.md)。
 
 ### 常见问题
 
@@ -255,7 +242,7 @@ npx vercel --prod
 |---|---|
 | 页面能打开，点分析报 500 + `missing_api_key` | 线上没配 `DEEPSEEK_API_KEY`，或配完没重新部署 |
 | 报 401 | Key 失效或额度用完（DeepSeek 控制台可查） |
-| 刷新 `/result/xxx` 404 | SPA 回落规则丢了（Vercel 看 `vercel.json`，EdgeOne 看 `edgeone.json`） |
+| 刷新 `/result/xxx` 404 | SPA 回落规则丢了，检查 `vercel.json` 里的 rewrite |
 | 本地 `vercel dev` 卡在 `Retrieving project…` | 所在网络访问不到 `api.vercel.com`（校园网常见），与代码无关 |
 | 流式变成「憋几秒一次性吐出」 | 边缘节点在攒包，要带上 `X-Accel-Buffering: no` |
 
